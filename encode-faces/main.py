@@ -1,19 +1,17 @@
 """
-Face Encoding Service – FastAPI
+main.py – Face Encoding Service
 ===============================
 
-A micro‑service to:
+FastAPI micro‑service to:
 
-1. **POST /upload-image** – Upload an image (any picture), detect faces
-   and bounding boxes (if present), store the file in Azure Blob Storage,
-   update the images and faces tables in the database, and return metadata.
-
-2. **GET /pics** – List stored pictures with optional filters and
-   stateless pagination.
-
-3. **GET /pics/{uuid}** – Retrieve metadata for a single picture.
-
-4. **GET /health** – Liveness / readiness probe.
+1. **POST /upload-image**      – Detect faces, upload image to Azure Blob, persist to DB.
+2. **GET /pics**               – List stored images with optional filters (incl. clusters).
+3. **GET /pics/{uuid}**        – Metadata for a single image and its faces.
+4. **DELETE /pics/{uuid}**     – Delete an image (rows + blob).
+5. **GET /clusters**           – Summary per cluster (counts + samples).
+6. **GET /blob/pics**          – Unchanged Azure Blob listing (infinite scroll).
+7. **GET /blob/pics/{uuid}**   – Metadata from Azure Blob Storage.
+8. **GET /health**             – Liveness / readiness probe.
 """
 
 from __future__ import annotations
@@ -23,305 +21,563 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import face_recognition
 import numpy as np
 import uvicorn
 from azure.core.exceptions import ResourceExistsError
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    # RedirectResponse,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
+from pydantic import BaseModel, Field
 from PIL import Image
 
+from src.db.database import Database
 from src.utils.azure_blob_storage import setup_blob_service_client
 
-# environment variables and global resources
 load_dotenv()
 
 CONTAINER_NAME: str = os.getenv("AZURE_CONTAINER_NAME", "images")
 _resources: Dict[str, Any] = {}
 
 
+# ─── Pydantic response models ───────────────────────────────────────────
+
+
+class ImageOut(BaseModel):
+    """
+    Image metadata returned from the database.
+
+    Attributes:
+        uuid:           32-character hex identifier.
+        azure_blob_url: URL of the image in Azure Blob Storage.
+        file_extension: e.g. 'jpg', derived by DB trigger.
+        faces:          Number of faces detected.
+        created_at:     Record creation timestamp.
+        last_modified:  Record last-modified timestamp.
+    """
+
+    uuid: str
+    azure_blob_url: str
+    file_extension: str = Field(..., example="jpg")
+    faces: int
+    created_at: datetime
+    last_modified: datetime
+
+
+class FaceOut(BaseModel):
+    """
+    Face metadata returned in image-details & similarity responses.
+
+    Attributes:
+        face_id:    Primary key of the face row.
+        image_uuid: Parent image UUID.
+        cluster_id: Cluster label of this face.
+        bbox:       Bounding box dict with keys 'x','y','width','height'.
+    """
+
+    face_id: int
+    image_uuid: str
+    cluster_id: int
+    bbox: Dict[str, int]
+
+
+class ImageDetails(BaseModel):
+    """
+    Combined image + all its faces.
+
+    Attributes:
+        image: ImageOut metadata.
+        faces: List of FaceOut entries.
+    """
+
+    image: ImageOut
+    faces: List[FaceOut]
+
+
+class UploadResp(BaseModel):
+    """
+    Response model for `/upload-image`.
+
+    Attributes:
+        uuid:       Assigned image UUID.
+        blob_url:   Public Azure Blob URL.
+        faces:      Number of faces detected.
+        boxes:      List of face-location boxes [top, right, bottom, left].
+        embeddings: List of 128-D float vectors.
+    """
+
+    uuid: str
+    blob_url: str
+    faces: int
+    boxes: List[Sequence[int]]
+    embeddings: List[Sequence[float]]
+
+
+class ClusterSample(BaseModel):
+    """
+    One random sample face within a cluster.
+
+    Attributes:
+        face_id:         Primary key of the sample face.
+        sample_blob_url: Azure Blob URL for that face's image.
+        sample_bbox:     Bounding-box dict for that sample face.
+    """
+
+    face_id: int
+    sample_blob_url: str
+    sample_bbox: Dict[str, int]
+
+
+class ClusterInfo(BaseModel):
+    """
+    Summary information for a single cluster.
+
+    Attributes:
+        cluster_id:  Integer label of the cluster.
+        face_count:  Total faces in this cluster.
+        samples:     Up to `sample_size` ClusterSample entries.
+    """
+
+    cluster_id: int
+    face_count: int
+    samples: List[ClusterSample]
+
+
+class SimilarFaceOut(BaseModel):
+    """
+    A single “similar face” result from `/find-similar`.
+
+    Attributes:
+        face_id:        Matching face's primary key.
+        image_uuid:     Parent image UUID.
+        azure_blob_url: URL of that image.
+        cluster_id:     Cluster label.
+        bbox:           Bounding box of the face.
+        embedding:      Full 128-D embedding.
+        distance:       Distance metric (lower = more similar).
+    """
+
+    face_id: int
+    image_uuid: str
+    azure_blob_url: str
+    cluster_id: int
+    bbox: Dict[str, int]
+    embedding: List[float]
+    distance: float
+
+
+# ─── Application setup & lifespan ────────────────────────────────────────
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Setup resources on startup, e.g. the Azure Blob Storage Client and Database Connection."""
-    logger.info("Initialising Azure Blob Storage Client…")
+    """Initialize Azure blob client and database pool on startup; clean up on shutdown."""
+    logger.info("⏳ Starting up – Azure Blob client…")
     _resources["blob"] = setup_blob_service_client(
-        connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING") or None,
+        connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     )
-    logger.info("Azure Blob Storage Client sucessfully initialised")
+    logger.success("✅ Azure Blob client ready")
 
-    logger.info("Initialising Database Connection…")
-    # _resources["db"] = setup_db_connection()
-    logger.info("Database Connection sucessfully initialised")
+    logger.info("⏳ Starting up – database pool…")
+    db = Database(
+        host=os.getenv("DBHOST", "localhost"),
+        port=int(os.getenv("DBPORT", 5432)),
+        user=os.getenv("DBUSER", "kanta_admin"),
+        password=os.getenv("DBPASSWORD", "password"),
+        database=os.getenv("DBNAME", "postgres"),
+        ssl=os.getenv("SSLMODE", "require"),
+    )
+    await db.connect()
+    _resources["db"] = db
+    logger.success("✅ Database pool ready")
 
     try:
         yield
     finally:
-        logger.info(
-            "Shutting down – releasing Azure Blob client and Database Connection…"
-        )
-        # _resources["blob"].close()
-        # _resources["db"].close()
+        logger.info("⏳ Shutting down…")
+        await db.close()
         _resources.clear()
+        logger.success("✅ Clean shutdown complete")
 
 
 app = FastAPI(
     title="Face Encoding API",
-    description="Upload pictures, get face metadata, and browse stored photos.",
+    description="Upload images, compute face embeddings, and query stored data.",
     lifespan=lifespan,
 )
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # lock down in production
+    allow_origins=["*"],  # tighten in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# endpoints
-@app.post("/upload-image/", response_model=Dict[str, Any])
-async def upload_image(image: UploadFile = File(...)) -> Dict[str, Any]:
-    """Upload an image, detect faces and coordinates (and generate embeddings), and persist to Azure Blob Storage, Database.
+# ─── Helpers ─────────────────────────────────────────────────────────────
 
-    Workflow:
-        1. **Validate** the incoming file is an image.
-        2. **Load** bytes into memory and convert to NumPy array.
-        3. **Detect** faces & bounding boxes (`face_recognition` HOG model).
-        4. **Generate** 128‑D embeddings for each detected face.
-        5. **Upload** raw bytes to Azure Blob Storage under a UUID path.
-        6  **Update** the image database with the image metadata (UUID, faces, boxes).
-        7  **Update** the faces database with the image UUID and face embeddings.
-        8. **Return** the blob URL + metadata (face count, embeddings, boxes).
 
-    Args:
-        image: Multipart file sent by the client.
+def get_db() -> Database:
+    """Dependency to retrieve our shared Database instance."""
+    return _resources["db"]  # type: ignore
 
-    Returns:
-        Dict with keys:
-            * `uuid` – unique ID assigned to the image.
-            * `blob_url` – absolute Azure URL.
-            * `faces` – number of faces detected.
-            * `boxes` – list of [top, right, bottom, left] ints.
-            * `embeddings` – list of 128‑float lists.
 
-    Raises:
-        HTTPException: 400 for bad input; 500 for upload failure.
-    """
-    if not image.content_type.startswith("image/"):
-        logger.warning("Rejected upload – file is not an image")
-        raise HTTPException(status_code=400, detail="File must be an image")
-
-    # Load image into memory
-    logger.info("Loading image…")
-    load_t0 = time.perf_counter()
-    data: bytes = await image.read()
-    try:
-        pil_img = Image.open(BytesIO(data))
-    except (OSError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid image data")
-    img_np = np.array(pil_img.convert("RGB"))
-    load_time = time.perf_counter() - load_t0
-
-    # Detect faces & embeddings
-    logger.info("Detecting faces & generating embeddings…")
-    try:
-        detect_t0 = time.perf_counter()
-        boxes: List[List[int]] = face_recognition.face_locations(img_np, model="hog")
-        embeddings = face_recognition.face_encodings(img_np, boxes) if boxes else []
-        detect_time = time.perf_counter() - detect_t0
-
-        if len(boxes) != len(embeddings):
-            logger.warning(
-                "Mismatch between boxes (%d) and embeddings (%d)",
-                len(boxes),
-                len(embeddings),
-            )
-    except Exception as e:
-        logger.exception("Face detection failed")
-        raise HTTPException(status_code=500, detail="Face detection failed") from e
-
-    # Prepare Azure container
+def get_container():
+    """Return (and create, if needed) our Azure container."""
     blob_service = _resources["blob"]
     container = blob_service.get_container_client(CONTAINER_NAME)
     try:
         container.create_container()
     except ResourceExistsError:
-        pass  # already exists
+        pass
+    return container
 
-    # Upload
-    logger.info("Uploading image to Azure Blob Storage…")
+
+# ─── Endpoints ──────────────────────────────────────────────────────────
+
+
+@app.post(
+    "/upload-image",
+    response_model=UploadResp,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload an image, detect faces, store in Azure + DB",
+)
+async def upload_image(
+    image: UploadFile = File(...),
+    db: Database = Depends(get_db),
+):
+    """
+    Detect faces in the uploaded image, store the file in Azure Blob Storage,
+    persist metadata to PostgreSQL, and return face locations & embeddings.
+    """
+    if not image.content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image")
+
+    # 1) Load into memory → NumPy
+    t0 = time.perf_counter()
+    raw = await image.read()
     try:
-        # Blob details
-        uuid_ = uuid.uuid4().hex
-        ext = (image.filename or "upload").split(".")[-1].lower()
-        blob_name = f"uploads/{uuid_}.{ext}"
-        metadata = {
-            "uuid": uuid_,
-            "faces": str(len(embeddings)),
-            "boxes": json.dumps(boxes),
-        }
-        container.upload_blob(
-            name=blob_name, data=data, overwrite=True, metadata=metadata
-        )
-    except Exception as exc:
-        logger.exception("Upload failed")
-        raise HTTPException(status_code=500, detail="Failed to upload image") from exc
+        pil = Image.open(BytesIO(raw)).convert("RGB")
+        img_np = np.array(pil)
+    except Exception:
+        raise HTTPException(400, "Invalid image data")
+    load_time = time.perf_counter() - t0
 
-    # INSERT into images database (not implemented)
-
-    # INSERT into faces database (not implemented)
-
-    upload_time = time.perf_counter() - detect_t0 - detect_time
+    # 2) Detect faces & embeddings
+    t1 = time.perf_counter()
+    boxes = face_recognition.face_locations(img_np, model="hog")
+    embeddings = face_recognition.face_encodings(img_np, boxes)
+    detect_time = time.perf_counter() - t1
     logger.info(
-        "Upload successful – load: %.2fs | detect: %.2fs | upload: %.2fs | faces: %d | uuid: %s",
-        load_time,
-        detect_time,
-        upload_time,
-        len(embeddings),
-        uuid_,
+        f"Detected {len(embeddings)} faces (load {load_time:.2f}s, detect {detect_time:.2f}s)"
     )
 
-    return {
-        "uuid": uuid_,
-        "blob_url": container.get_blob_client(blob_name).url,
-        "faces": len(embeddings),
-        "boxes": boxes,
-        "embeddings": [e.tolist() for e in embeddings],
-    }
-
-
-@app.get("/blob/pics", response_model=Dict[str, Any])
-async def list_pics(
-    limit: int = Query(50, ge=1, le=200),
-    continuation_token: Optional[str] = Query(
-        None, description="Opaque cursor returned by the previous page"
-    ),
-) -> Dict[str, Any]:
-    """List stored pictures with optional filters & pagination.
-
-    Args:
-        limit: Max number of blobs to return (1‑200).
-        continuation_token: Cursor for the next page (from previous response).
-        date_from / date_to: Server‑side filtering by blob `last_modified`.
-        faces_min / faces_max: Filter using blob metadata (`faces`).
-
-    Returns:
-        {
-            "pictures": [ {uuid, blob_url, faces, boxes, last_modified}, … ],
-            "next_token": str | null
-        }
-    """
-    blob_service = _resources["blob"]
-    container = blob_service.get_container_client(CONTAINER_NAME)
-
-    # Build a page iterator
-    list_paged = container.list_blobs(
-        name_starts_with="uploads/",
-        results_per_page=limit,
-        include=["metadata", "tags"],
-    ).by_page(continuation_token)
-
+    # 3) Upload the raw image to Azure Blob
+    container = get_container()
+    uid = uuid.uuid4().hex
+    ext = (image.filename or "upload").split(".")[-1].lower()
+    blob_name = f"uploads/{uid}.{ext}"
     try:
-        # Fetch the *first* page only
-        first_page = next(list_paged)
-    except StopIteration:
-        # Empty container or continuation token was beyond the end
-        return {"items": [], "next_token": None}
-
-    pictures: List[Dict[str, Any]] = []
-    for blob in first_page:
-        # For now. don't implement client-side filtering, default to no filters so frontend can scroll infintely.
-        # Azure Blob Sotrage is not a database, so we can't filter on metadata or tags easily
-        # We index blobs in a DB when filtering is needed, since we can filter, sort and paginate easily.
-
-        # # ------------------ server‑side properties ----------------------- #
-        # if date_from and blob.last_modified < date_from:
-        #     continue
-        # if date_to and blob.last_modified > date_to:
-        #     continue
-
-        # # ------------------ metadata filters ---------------------------- #
-        # if faces_min is not None and faces < faces_min:
-        #     continue
-        # if faces_max is not None and faces > faces_max:
-        #     continue
-
-        meta = blob.metadata or {}
-        pictures.append(
-            {
-                "uuid": meta.get("uuid") or blob.name.split("/")[-1].split(".")[0],
-                "blob_url": container.get_blob_client(blob).url,
-                "faces": int(meta.get("faces", "0")),
-                "boxes": json.loads(meta.get("boxes", "[]")),
-                "creation_time": blob.creation_time,
-                "last_modified": blob.last_modified,
-            }
+        logger.info(f"Uploading image {uid} to Azure Blob Storage")
+        container.upload_blob(
+            name=blob_name,
+            data=raw,
+            overwrite=True,
+            metadata={
+                "uuid": uid,
+                "faces": str(len(embeddings)),
+                "boxes": json.dumps(boxes),
+            },
         )
+        logger.success(f"Uploaded image {uid} to Azure Blob Storage")
+    except Exception:
+        logger.exception("Blob upload failed")
+        raise HTTPException(500, "Failed to upload to Azure")
 
-    # Expose the continuation token for the next page
-    # If the page is empty, the token will be None
-    next_token = list_paged.continuation_token
-    return {"pictures": pictures, "next_token": next_token}
-
-
-@app.get("/blob/pics/{uuid}", response_model=Dict[str, Any])
-async def get_pic(uuid: str) -> Dict[str, Any]:
-    """Retrieve a single picture's metadata by UUID.
-
-    Args:
-        uuid: The 32‑char hex ID generated on upload.
-
-    Returns:
-        Dict with `uuid`, `blob_url`, `faces`, `boxes`, `creation_time`, `last_modified`.
-    """
-    blob_service = _resources["blob"]
-    container = blob_service.get_container_client(CONTAINER_NAME)
-    blob_client = container.get_blob_client(f"uploads/{uuid}")
-
-    # The blob could have any extension; iterate over common ones
-    for extension in ("jpg", "jpeg", "png", "gif", "webp"):
-        bc = container.get_blob_client(f"uploads/{uuid}.{extension}")
-        if bc.exists():
-            blob_client = bc
-            break
-    else:
-        raise HTTPException(status_code=404, detail="Picture not found")
-
+    blob_client = container.get_blob_client(blob_name)
     props = blob_client.get_blob_properties()
-    meta = props.metadata or {}
+    blob_url = blob_client.url
 
-    return {
-        "uuid": uuid,
-        "blob_url": blob_client.url,
-        "faces": int(meta.get("faces", "0")),
-        "boxes": json.loads(meta.get("boxes", "[]")),
-        "creation_time": props.creation_time,
-        "last_modified": props.last_modified,
-    }
+    # 4) Persist image row
+    logger.info(f"Inserting image {uid} into DB")
+    await db.insert_image(
+        image_uuid=uid,
+        azure_blob_url=blob_url,
+        faces=len(embeddings),
+        created_at=props.creation_time.replace(tzinfo=None),
+        last_modified=props.last_modified.replace(tzinfo=None),
+    )
+    logger.info(f"Inserted image {uid} into DB")
+
+    # 5) Persist face rows
+    logger.info(f"Inserting {len(embeddings)} faces into DB")
+    for box, emb in zip(boxes, embeddings):
+        await db.insert_face(
+            image_uuid=uid,
+            bbox={
+                "x": box[3],
+                "y": box[0],
+                "width": box[1] - box[3],
+                "height": box[2] - box[0],
+            },
+            embedding=emb.tolist(),
+            cluster_id=-2,  # consider the best default value:
+        )
+    logger.info(f"Inserted {len(embeddings)} faces into DB")
+
+    return UploadResp(
+        uuid=uid,
+        blob_url=blob_url,
+        faces=len(embeddings),
+        boxes=boxes,
+        embeddings=[e.tolist() for e in embeddings],
+    )
 
 
-@app.get("/health", response_model=Dict[str, str])
-async def get_health_status() -> Dict[str, str]:
-    """Liveness / readiness probe.
-
-    Returns:
-        Simple JSON object indicating API and Azure connection status.
+@app.get(
+    "/pics",
+    response_model=List[ImageOut],
+    summary="List stored images with optional filters & pagination",
+)
+async def get_pics(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    min_faces: Optional[int] = Query(None, ge=0),
+    max_faces: Optional[int] = Query(None, ge=0),
+    cluster_list_id: Optional[List[int]] = Query(None),
+    db: Database = Depends(get_db),
+):
     """
-    azure_status = "connected" if "blob" in _resources else "disconnected"
-    database_status = "connected"  # if "db" in _resources else "disconnected"
+    Retrieve a page of images from the DB.
 
+    - `date_from` / `date_to`: ISO 8601 timestamps (will be UTC).
+    - `min_faces` / `max_faces`: face-count filters.
+    - `cluster_list_id`: only images having at least one face in any of these clusters.
+    """
+    rows = await db.get_images(
+        limit=limit,
+        offset=offset,
+        date_from=(date_from.replace(tzinfo=None) if date_from else None),
+        date_to=(date_to.replace(tzinfo=None) if date_to else None),
+        min_faces=min_faces,
+        max_faces=max_faces,
+        cluster_list_id=cluster_list_id,
+    )
+    return [ImageOut(**r) for r in rows]
+
+
+@app.get(
+    "/pics/{uuid}",
+    response_model=ImageDetails,
+    summary="Get one image’s metadata plus its faces",
+)
+async def get_pic(
+    uuid: str,
+    db: Database = Depends(get_db),
+):
+    """
+    Fetch a single image row plus all its face rows by UUID.
+    """
+    result = await db.get_image_details_by_uuid(uuid)
+    if not result:
+        raise HTTPException(404, f"Image `{uuid}` not found")
+    return ImageDetails(
+        image=ImageOut(**result["image"]),
+        faces=[FaceOut(**f) for f in result["faces"]],
+    )
+
+
+@app.delete(
+    "/pics/{uuid}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an image and its faces (DB + blob)",
+)
+async def delete_pic(
+    uuid: str,
+    db: Database = Depends(get_db),
+):
+    """
+    Remove an image from Azure + PostgreSQL by UUID.
+    """
+    container = get_container()
+
+    # 1) Look for an existing blob under any of our known extensions
+    found = False
+    for ext in ("jpg", "jpeg", "png", "gif", "webp"):
+        blob_name = f"uploads/{uuid}.{ext}"
+        bc = container.get_blob_client(blob_name)
+
+        if bc.exists():  # or: await bc.exists() if using async client
+            # 2) Delete it and stop searching
+            bc.delete_blob()  # or: await bc.delete_blob()
+            logger.info(f"Deleted blob for image with uuid {blob_name}")
+            found = True
+            break
+
+    # 3) If we never found a blob, that's a 404
+    if not found:
+        logger.warning(f"No blob found for image uuid={uuid}")
+        raise HTTPException(404, f"Image `{uuid}` not found")
+
+    # 4) Now delete the DB row (faces ON DELETE CASCADE will go too)
+    await db.delete_image_by_uuid(uuid)
+    logger.info(f"Deleted database records for image with uuid {uuid}")
+
+    # FastAPI will automatically return a 204 with no content
+
+
+@app.get(
+    "/clusters",
+    responses={307: {"description": "Redirect to filtered /pics"}},
+    summary="Either show cluster summary or redirect by cluster_ids → /pics",
+)
+async def clusters(
+    cluster_ids: Optional[List[int]] = Query(None, alias="cluster_ids"),
+    sample_size: int = Query(5, ge=1, le=20),
+    db: Database = Depends(get_db),
+) -> Union[List[ClusterInfo], str]:
+    """
+    - If `?cluster_ids=` is provided, immediately redirect (307) to
+      `/pics?cluster_list_id=<id>&...` for the same cluster filters.
+    - Otherwise, return a summary (face counts + random samples) per cluster.
+    """
+    # if cluster_ids:
+    #     qs = "&".join(f"cluster_list_id={c}" for c in cluster_ids)
+    #     return RedirectResponse(url=f"/pics?{qs}", status_code=307)
+
+    summary = await db.get_cluster_info(sample_size=sample_size)
+    return [ClusterInfo(**c) for c in summary]
+
+
+@app.post(
+    "/find-similar",
+    response_model=List[SimilarFaceOut],
+    summary="Find the top-K most similar faces to the one you upload",
+)
+async def find_similar(
+    image: UploadFile = File(..., description="Face image → exactly one face"),
+    metric: str = Query(
+        "cosine", description="Metric: 'cosine' or 'l2'", regex="^(cosine|l2)$"
+    ),
+    top_k: int = Query(10, ge=1, le=100),
+    db: Database = Depends(get_db),
+):
+    """
+    Detect exactly one face in the upload, compute its embedding, then
+    return the top-K nearest neighbors from the database.
+    """
+    if not image.content_type.startswith("image/"):
+        raise HTTPException(400, "File must be an image")
+
+    raw = await image.read()
+    try:
+        pil = Image.open(BytesIO(raw)).convert("RGB")
+    except Exception:
+        raise HTTPException(400, "Invalid image data")
+
+    img_np = np.array(pil)
+    boxes = face_recognition.face_locations(img_np, model="hog")
+    if len(boxes) != 1:
+        msg = "No face detected" if not boxes else "Multiple faces detected"
+        raise HTTPException(400, msg)
+
+    emb = face_recognition.face_encodings(img_np, boxes)[0].tolist()
+    logger.info("Searching top-%d by %s distance…", top_k, metric)
+    hits = await db.similarity_search(
+        target_embedding=emb,
+        metric=metric,
+        top_k=top_k,
+    )
+    logger.success("Found %d similar faces", len(hits))
+    return [SimilarFaceOut(**r) for r in hits]
+
+
+# Deprecated: use `/pics` instead
+# @app.get(
+#     "/blob/pics",
+#     response_model=Dict[str, Any],
+#     summary="Azure-blob infinite-scroll listing (unchanged)",
+# )
+# async def list_blob_pics(
+#     limit: int = Query(50, ge=1, le=200),
+#     continuation_token: Optional[str] = Query(None),
+# ):
+#     blob_service = _resources["blob"]
+#     container = blob_service.get_container_client(CONTAINER_NAME)
+#     pages = container.list_blobs(
+#         name_starts_with="uploads/", include=["metadata"], results_per_page=limit
+#     ).by_page(continuation_token)
+#     try:
+#         first = next(pages)
+#     except StopIteration:
+#         return {"items": [], "next_token": None}
+
+#     items = []
+#     for b in first:
+#         m = b.metadata or {}
+#         items.append(
+#             {
+#                 "uuid": m.get("uuid"),
+#                 "blob_url": container.get_blob_client(b).url,
+#                 "faces": int(m.get("faces", "0")),
+#                 "boxes": json.loads(m.get("boxes", "[]")),
+#                 "creation_time": b.creation_time,
+#                 "last_modified": b.last_modified,
+#             }
+#         )
+
+#     return {"items": items, "next_token": pages.continuation_token}
+
+# Deprecated: use `/pics/{uuid}` instead
+# @app.get(
+#     "/blob/pics/{uuid}",
+#     response_model=Dict[str, Any],
+#     summary="Fetch a single blob’s metadata by UUID",
+# )
+# async def get_blob_pic(uuid: str) -> Dict[str, Any]:
+#     blob_service = _resources["blob"]
+#     container = blob_service.get_container_client(CONTAINER_NAME)
+#     for ext in ("jpg", "jpeg", "png", "gif", "webp"):
+#         bc = container.get_blob_client(f"uploads/{uuid}.{ext}")
+#         if bc.exists():
+#             props = bc.get_blob_properties()
+#             m = props.metadata or {}
+#             return {
+#                 "uuid": uuid,
+#                 "blob_url": bc.url,
+#                 "faces": int(m.get("faces", "0")),
+#                 "boxes": json.loads(m.get("boxes", "[]")),
+#                 "creation_time": props.creation_time,
+#                 "last_modified": props.last_modified,
+#             }
+#     raise HTTPException(status_code=404, detail="Blob not found")
+
+
+@app.get("/health", summary="Liveness/readiness probe")
+async def health() -> Dict[str, str]:
+    azure_status = "blob" in _resources
+    db_status = "db" in _resources
+    healthy = azure_status and db_status
     return {
-        "status": "healthy" if azure_status == "connected" else "unhealthy",
-        "message": "Face Encoding API is operational",
-        "azure_connection": azure_status,
-        "database_connection": database_status,
+        "status": "healthy" if healthy else "unhealthy",
+        "azure": "connected" if azure_status else "disconnected",
+        "db": "connected" if db_status else "disconnected",
     }
 
 
@@ -330,5 +586,5 @@ if __name__ == "__main__":  # pragma: no cover
         "main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", 8000)),
-        reload=os.getenv("DEV") == "1",
+        reload=True,
     )

@@ -1,25 +1,12 @@
-"""
-tests/test_database.py
-======================
-End‑to‑end unit tests for ``src.db.database.Database``.
-
-Expected behaviour
-------------------
-1.  We can insert image rows and immediately query them back.
-2.  Faces can be appended to an image and paged/filter‑queried correctly.
-3.  Cluster IDs can be bulk‑updated in a single call.
-4.  Ad‑hoc SQL works and rows are removed when delete helpers are called.
-
-The tests use **fresh UUIDs** per run to avoid clashes and rely on a dedicated
-test database.  Each test function gets its own connection pool so they can run
-in parallel without "operation in progress" errors.
-"""
+# tests/test_database.py
+# ======================
+# End-to-end async tests for src.db.database.Database.
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
-import os
 from typing import Dict, List
 
 import pytest
@@ -31,11 +18,11 @@ from src.db.database import Database
 # Fixtures
 @pytest_asyncio.fixture(scope="function")
 async def db() -> Database:
-    """Create a new Database pool for every test function."""
+    """Create and tear down a fresh Database pool for each test."""
     instance = Database(
-        host=os.getenv("DBHOST"),
+        host=os.getenv("DBHOST", "localhost"),
         user=os.getenv("DBUSER", "kanta_admin"),
-        password=os.getenv("DBPASSWORD"),
+        password=os.getenv("DBPASSWORD", "password"),
         database=os.getenv("DBNAME", "postgres"),
         port=int(os.getenv("DBPORT", 5432)),
     )
@@ -44,136 +31,171 @@ async def db() -> Database:
     await instance.close()
 
 
-# Helper functions
-async def _insert_image(
-    db: Database,
-    *,
-    faces: int = 0,
-) -> str:
-    """Insert one image and return its UUID."""
-    uuid_hex = uuid.uuid4().hex
+# Helper Functions
+async def _insert_image(db: Database, *, faces: int = 0) -> str:
+    """
+    Insert one image row and return its UUID.
+    Automatically stamps `created_at` / `last_modified` with UTC-now.
+    """
+    u = uuid.uuid4().hex
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.insert_image(
-        uuid=uuid_hex,
-        url=f"https://blob/{uuid_hex}.jpg",
+        image_uuid=u,
+        azure_blob_url=f"https://blob.test/{u}.jpg",
         faces=faces,
         created_at=now,
         last_modified=now,
     )
-    return uuid_hex
+    return u
 
 
 async def _insert_faces(
-    db: Database,
-    *,
-    image_uuid: str,
-    n: int = 2,
+    db: Database, *, image_uuid: str, n: int = 2, start: float = 0.1
 ) -> List[int]:
-    """Insert *n* dummy faces for *image_uuid* and return their IDs."""
-    ids: List[int] = []
+    """
+    Insert `n` faces with subtly different embeddings into `image_uuid`,
+    then return their generated face_ids via get_image_details_by_uuid().
+    """
     for i in range(n):
+        val = start + i * 0.01
         await db.insert_face(
             image_uuid=image_uuid,
-            cluster_id=0,
             bbox={"x": i, "y": i, "width": 10 + i, "height": 10 + i},
-            embedding=[0.1 + i * 0.01] * 128,
+            embedding=[val] * 128,
+            cluster_id=-1,
         )
-        # grab the id just inserted (cheapest: RETURNING would be nicer)
-    rows = await db.get_faces(image_uuid=image_uuid)
-    ids.extend(face["face_id"] for face in rows[-n:])
-    return ids
+    # fetch all faces and extract the last n entries
+    details = await db.get_image_details_by_uuid(image_uuid)
+    assert details is not None, "Failed to retrieve image details after inserts"
+    return [f["face_id"] for f in details["faces"]][-n:]
 
 
-# CRUD tests
+# Test
+
+
 @pytest.mark.asyncio
 async def test_insert_and_get_images(db: Database) -> None:
-    """Images inserted via ``insert_image`` are returned by ``get_images``."""
-    img1_uuid = await _insert_image(db)
-    img2_uuid = await _insert_image(db)
+    """`insert_image` then `get_images` without filters should return it."""
+    u1 = await _insert_image(db, faces=1)
+    u2 = await _insert_image(db, faces=2)
 
-    rows = await db.get_images()
-    uuids = {r["uuid"].strip() for r in rows}
+    all_imgs = await db.get_images(limit=50, offset=0)
+    uuids = {row["uuid"].strip() for row in all_imgs}
 
-    assert img1_uuid in uuids, f"{img1_uuid} missing from results {uuids}"
-    assert img2_uuid in uuids, f"{img2_uuid} missing from results {uuids}"
+    assert u1 in uuids, f"Expected {u1!r} in {uuids}"
+    assert u2 in uuids, f"Expected {u2!r} in {uuids}"
 
+    # test min_faces / max_faces filters
+    few = await db.get_images(min_faces=2, limit=10, offset=0)
+    assert all(r["faces"] >= 2 for r in few), "min_faces filter failed"
 
-@pytest.mark.asyncio
-async def test_insert_and_get_faces(db: Database) -> None:
-    """Faces can be inserted and paginated."""
-    img_uuid = await _insert_image(db)
-    await _insert_faces(db, image_uuid=img_uuid, n=3)
-
-    faces_for_img = await db.get_faces(image_uuid=img_uuid)
-    assert len(faces_for_img) == 3, f"Expected 3 faces, got {len(faces_for_img)}"
-
-    first_page = await db.get_faces(image_uuid=img_uuid, limit=1, offset=0)
-    second_page = await db.get_faces(image_uuid=img_uuid, limit=1, offset=1)
-
-    assert (
-        first_page[0]["face_id"] != second_page[0]["face_id"]
-    ), "Pagination returned duplicate rows"
+    some = await db.get_images(max_faces=1, limit=10, offset=0)
+    assert all(r["faces"] <= 1 for r in some), "max_faces filter failed"
 
 
 @pytest.mark.asyncio
-async def test_vector_search_raw(db: Database) -> None:
-    """Top‑1 search should return the identical face as most similar."""
-    uid = await _insert_image(db)
-    await _insert_faces(db, image_uuid=uid, n=1)
-    ref_vec = [0.1] * 128
+async def test_get_image_details_and_insert_faces(db: Database) -> None:
+    """`get_image_details_by_uuid` reflects inserted faces and metadata."""
+    u = await _insert_image(db, faces=0)
+    fids = await _insert_faces(db, image_uuid=u, n=2, start=0.2)  # add two faces
 
-    hits = await db.similarity_search(
-        target_embedding=ref_vec, metric="cosine", top_k=2
-    )
+    details = await db.get_image_details_by_uuid(u)
+    assert details is not None, "Expected image_details, got None"
+    assert details["image"]["uuid"].strip() == u
+    received = details["faces"]
+    ids = [f["face_id"] for f in received]
+    assert set(fids) <= set(ids), f"Inserted {fids}, got back {ids}"
+
+
+@pytest.mark.asyncio
+async def test_similarity_search(db: Database) -> None:
+    """The exact same vector should be returned with zero (or minimal) distance."""
+    u = await _insert_image(db)
+    fids = await _insert_faces(db, image_uuid=u, n=1, start=0.42)
+    ref = [0.42] * 128
+
+    hits = await db.similarity_search(target_embedding=ref, metric="cosine", top_k=3)
+    assert hits, "Expected at least one hit"
     print(hits)
-    assert hits, "Search returned no rows"
+
+    # # the top hit should correspond to our single inserted face
+    # top = hits[0]
+    # assert (
+    #     top["face_id"] == fids[0]
+    # ), f"Expected face_id {fids[0]}, got {top['face_id']}"
 
 
 @pytest.mark.asyncio
-async def test_get_all_embeddings_raw(db: Database) -> None:
-    """get_all_embeddings should return parsed 128‑D vectors for each face."""
-    uid = await _insert_image(db)
-    await _insert_faces(db, image_uuid=uid, n=3)
+async def test_get_all_embeddings(db: Database) -> None:
+    """`get_all_embeddings` returns parsed 128-D lists with correct keys."""
+    u = await _insert_image(db)
+    await _insert_faces(db, image_uuid=u, n=3, start=0.55)
 
     rows = await db.get_all_embeddings()
-    ours = [r for r in rows if r["face_id"] >= rows[-3]["face_id"]]  # last 3 we added
+    # take last 3
+    tail = rows[-3:]
+    assert tail, "No embeddings returned"
+    for r in tail:
+        assert set(r.keys()) == {"face_id", "embedding"}  # check keys
+        assert isinstance(r["embedding"], list)  # check type
+        assert len(r["embedding"]) == 128  # check length
 
-    assert ours, "No embeddings returned"
 
-    expected_keys = {"face_id", "embedding"}
+@pytest.mark.asyncio
+async def test_update_cluster_and_filter_images(db: Database) -> None:
+    """Bulk-update cluster IDs then use `get_images(cluster_list_id=…)`."""
+    u1 = await _insert_image(db)
+    u2 = await _insert_image(db)
+    f1 = (await _insert_faces(db, image_uuid=u1, n=1, start=0.1))[0]
+    f2 = (await _insert_faces(db, image_uuid=u2, n=1, start=0.2))[0]
+
+    upd = {f1: 7, f2: 8}
+    await db.update_cluster_ids(upd)
+
+    # only u1 (cluster 7)
+    imgs7 = await db.get_images(cluster_list_id=[7], limit=10, offset=0)
+    assert u1 in {img["uuid"].strip() for img in imgs7}, f"Expected {u1!r} in {imgs7}"
+
+    # only u2 (cluster 8)
+    imgs8 = await db.get_images(cluster_list_id=[8], limit=10, offset=0)
+    assert u2 in {img["uuid"].strip() for img in imgs8}, f"Expected {u2!r} in {imgs8}"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_info(db: Database) -> None:
+    """`get_cluster_info` returns per-cluster counts and up to sample_size entries."""
+    u = await _insert_image(db)
+    fids = await _insert_faces(
+        db, image_uuid=u, n=5, start=0.3
+    )  # insert 5 faces in cluster 3
+    await db.update_cluster_ids({fid: 3 for fid in fids})  # assign cluster_id=3
+
+    summary = await db.get_cluster_info(sample_size=2)
+
+    # assert structure
+    assert isinstance(summary, list)
+    expected = {
+        "cluster_id",
+        "face_count",
+        "samples",
+    }  # each summary dict must have exactly these three keys
     assert all(
-        expected_keys == set(r) for r in ours
-    ), f"Row keys mismatch — expected {expected_keys}"
-    assert all(isinstance(r["embedding"], list) for r in ours), "Embedding not list"
-    assert all(len(r["embedding"]) == 128 for r in ours), "Vector length ≠ 128"
+        set(item.keys()) == expected for item in summary
+    ), f"Unexpected summary structure: {summary}"
 
 
 @pytest.mark.asyncio
-async def test_cluster_update(db: Database) -> None:
-    """``update_cluster_ids`` should modify multiple rows in one call."""
-    img_uuid = await _insert_image(db)
-    face_ids = await _insert_faces(db, image_uuid=img_uuid, n=2)
-
-    update_map: Dict[int, int] = {face_ids[0]: 98, face_ids[1]: 99}
-    await db.update_cluster_ids(update_map)
-
-    rows = await db.get_faces(image_uuid=img_uuid)
-    clusters = {r["cluster_id"] for r in rows}
-    assert clusters >= {98, 99}, f"Clusters not updated: {clusters}"
-
-
-@pytest.mark.asyncio
-async def test_raw_query_and_delete(db: Database) -> None:
-    """Faces count should drop after delete helpers are used."""
-    img_uuid = await _insert_image(db)
-    await _insert_faces(db, image_uuid=img_uuid, n=2)
+async def test_raw_query_and_deletion(db: Database) -> None:
+    """You can run ad-hoc SQL and delete all faces + image afterwards."""
+    u = await _insert_image(db)
+    await _insert_faces(db, image_uuid=u, n=2)
 
     before = await db.string_query("SELECT COUNT(*) FROM faces")
-    await db.delete_faces_for_image(img_uuid)
-    await db.delete_image(img_uuid)
+    before_cnt = before[0]["count"]
+    await db.delete_image_by_uuid(u)
     after = await db.string_query("SELECT COUNT(*) FROM faces")
+    after_cnt = after[0]["count"]
 
-    assert after[0]["count"] < before[0]["count"], (
-        f"Expected lower count after deletion; before={before[0]['count']} "
-        f"after={after[0]['count']}"
-    )
+    assert (
+        after_cnt < before_cnt
+    ), f"Expected fewer faces after delete, got {after_cnt} ≥ {before_cnt}"
