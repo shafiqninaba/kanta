@@ -124,11 +124,27 @@ class Database:
         except Exception as exc:
             raise RuntimeError(f"string_query failed: {exc}") from exc
 
+    # Event helper
+    # ======================================================================
+    async def get_event_id(self, event_code: str) -> int:
+        """
+        Resolve an event_code to its integer primary key.
+        Raises ValueError if no such event exists.
+        """
+        rows = await self.string_query(
+            "SELECT id FROM events WHERE code = $1",
+            event_code,
+        )
+        if not rows:
+            raise ValueError(f"Unknown event code: {event_code}")
+        return rows[0]["id"]
+
     # Images
     # ======================================================================
 
     async def insert_image(
         self,
+        event_code: str,
         image_uuid: str,
         azure_blob_url: str,
         faces: int,
@@ -139,18 +155,24 @@ class Database:
         Insert a new row into the `images` table.
 
         Args:
+            event_code:     Event code (string).
             image_uuid:     32-character UUID string (no dashes).
             azure_blob_url: Azure Blob Storage URL for the image.
             faces:          Number of detected faces.
             created_at:     Timestamp when the image was created.
             last_modified:  Timestamp when the image was last modified.
         """
+        event_id = await self.get_event_id(event_code)
         await self.string_query(
             """
-            INSERT INTO images(uuid, azure_blob_url, faces, created_at, last_modified)
-            VALUES($1, $2, $3, $4, $5)
+            INSERT INTO images(
+                event_id, uuid, azure_blob_url, faces,
+                created_at, last_modified
+            )
+            VALUES($1, $2, $3, $4, $5, $6)
             ON CONFLICT (uuid) DO NOTHING
             """,
+            event_id,
             image_uuid,
             azure_blob_url,
             faces,
@@ -161,6 +183,7 @@ class Database:
     async def get_images(
         self,
         *,
+        event_code: str,
         limit: int = 50,
         offset: int = 0,
         date_from: Optional[datetime] = None,
@@ -173,6 +196,7 @@ class Database:
         Query a list of images, with optional filters and pagination.
 
         Args:
+            event_code:       Event code (string).
             limit:            Max rows to return (default: 50).
             offset:           Offset (default: 0).
             date_from:        Images created on or after this date.
@@ -184,18 +208,12 @@ class Database:
         Returns:
             List of image rows as dicts; uses DISTINCT when filtering by cluster.
         """
-        params: List[Any] = []
-        where_clauses: List[str] = []
+        event_id = await self.get_event_id(event_code)
+        params: List[Any] = [event_id]
+        where_clauses = ["i.event_id = $1"]
         join_cluster = ""
 
-        # cluster filter
-        if cluster_list_id:
-            params.append(cluster_list_id)
-            idx = len(params)
-            join_cluster = "JOIN faces AS f2 ON f2.image_uuid = i.uuid"
-            where_clauses.append(f"f2.cluster_id = ANY(${idx})")
-
-        def _add(cond: str, val: Any) -> None:
+        def _add(cond: str, val: Any):
             params.append(val)
             where_clauses.append(f"{cond} ${len(params)}")
 
@@ -207,28 +225,24 @@ class Database:
             _add("i.faces >=", min_faces)
         if max_faces is not None:
             _add("i.faces <=", max_faces)
+        if cluster_list_id:
+            params.append(cluster_list_id)
+            idx = len(params)
+            join_cluster = "JOIN faces f2 ON f2.image_uuid = i.uuid"
+            where_clauses.append(f"f2.cluster_id = ANY(${idx})")
 
-        # pagination
         params.extend([limit, offset])
-        limit_idx, offset_idx = len(params) - 1, len(params)
-
-        where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-
+        where = " AND ".join(where_clauses)
         sql = f"""
         SELECT DISTINCT
-            i.uuid,
-            i.azure_blob_url,
-            i.faces,
-            i.created_at,
-            i.last_modified,
-            i.file_extension
-        FROM images AS i
+            i.uuid, i.azure_blob_url, i.faces,
+            i.created_at, i.last_modified, i.file_extension
+        FROM images i
         {join_cluster}
-        {where}
+        WHERE {where}
         ORDER BY i.created_at DESC
-        LIMIT ${limit_idx} OFFSET ${offset_idx}
+        LIMIT ${len(params)-1} OFFSET ${len(params)}
         """
-
         rows = await self.string_query(sql, *params)
         return [dict(r) for r in rows]
 
@@ -308,6 +322,7 @@ class Database:
 
     async def insert_face(
         self,
+        event_code: str,
         image_uuid: str,
         bbox: Dict[str, int],
         embedding: List[float],
@@ -322,6 +337,8 @@ class Database:
             embedding:  128-dimensional embedding vector.
             cluster_id: Cluster label (default -1).
         """
+        event_id = await self.get_event_id(event_code)
+
         row = await self.string_query(
             "SELECT id FROM images WHERE uuid = $1", image_uuid
         )
@@ -331,22 +348,29 @@ class Database:
 
         await self.string_query(
             """
-            INSERT INTO faces(image_id, image_uuid, bbox, embedding, cluster_id)
-            VALUES($1, $2, $3::jsonb, $4::vector, $5)
-            """,
+        INSERT INTO faces(
+            event_id, image_id, image_uuid,
+            bbox, embedding, cluster_id
+        )
+        VALUES($1, $2, $3, $4::jsonb, $5::vector, $6)
+        """,
+            event_id,
             image_id,
             image_uuid,
             json.dumps(bbox),
-            f"[{','.join(map(str, embedding))}]",
+            f"[{','.join(map(str, embedding))}]",  # <- stringify the vector here
             cluster_id,
         )
 
-    async def get_cluster_info(self, sample_size: int = 5) -> List[Dict[str, Any]]:
+    async def get_cluster_info(
+        self, event_code: str, sample_size: int = 5
+    ) -> List[Dict[str, Any]]:
         """
         Return one summary row per cluster, each with up to `sample_size`
         randomly chosen faces for that cluster.
 
         Args:
+            event_code: event code (string).
             sample_size: maximum number of random samples per cluster.
 
         Returns:
@@ -363,50 +387,46 @@ class Database:
                 ]
               }
         """
+        event_id = await self.get_event_id(event_code)
+
         sql = """
         WITH summary AS (
-          SELECT 
-            cluster_id,
-            COUNT(*)     AS face_count
-          FROM faces
-          GROUP BY cluster_id
+        SELECT cluster_id, COUNT(*) AS face_count
+        FROM faces
+        WHERE event_id = $1
+        GROUP BY cluster_id
         )
         SELECT
-          s.cluster_id,
-          s.face_count,
-          subs.sample_face_id   AS face_id,
-          subs.sample_blob_url,
-          subs.sample_bbox
+        s.cluster_id,
+        s.face_count,
+        subs.id           AS face_id,
+        i.azure_blob_url  AS sample_blob_url,
+        subs.bbox         AS sample_bbox
         FROM summary s
         CROSS JOIN LATERAL (
-          SELECT
-            f.id              AS sample_face_id,
-            i.azure_blob_url  AS sample_blob_url,
-            f.bbox            AS sample_bbox
-          FROM faces f
-          JOIN images i ON i.uuid = f.image_uuid
-          WHERE f.cluster_id = s.cluster_id
-          ORDER BY RANDOM()
-          LIMIT $1
+        SELECT id, image_uuid, bbox                -- ← include image_uuid
+        FROM faces
+        WHERE event_id = $1 AND cluster_id = s.cluster_id
+        ORDER BY RANDOM()
+        LIMIT $2
         ) AS subs
+        JOIN images i ON i.uuid = subs.image_uuid
         ORDER BY s.cluster_id
         """
-        rows = await self.string_query(sql, sample_size)
+
+        # pass *both* parameters in the correct order
+        rows = await self.string_query(sql, event_id, sample_size)
 
         clusters: Dict[int, Dict[str, Any]] = {}
         for r in rows:
             cid = r["cluster_id"]
-            # initialize cluster dict on first sight
-            if cid not in clusters:
-                clusters[cid] = {
-                    "cluster_id": cid,
-                    "face_count": r["face_count"],
-                    "samples": [],
-                }
-            # parse bbox if needed
+            clusters.setdefault(
+                cid, {"cluster_id": cid, "face_count": r["face_count"], "samples": []}
+            )
             bbox = r["sample_bbox"]
             if isinstance(bbox, str):
                 bbox = json.loads(bbox)
+
             clusters[cid]["samples"].append(
                 {
                     "face_id": r["face_id"],
@@ -414,8 +434,8 @@ class Database:
                     "sample_bbox": bbox,
                 }
             )
-        # return in ascending cluster_id order
-        return [clusters[cid] for cid in sorted(clusters)]
+
+        return [clusters[c] for c in sorted(clusters)]
 
     # async def get_faces(
     #     self,
@@ -513,6 +533,7 @@ class Database:
     async def similarity_search(
         self,
         *,
+        event_code: str,
         target_embedding: Sequence[float],
         metric: str = "cosine",
         top_k: int = 10,
@@ -521,6 +542,7 @@ class Database:
         Return top_k most similar faces to a reference embedding.
 
         Args:
+            event_code:       Event code (string).
             target_embedding: 128-D reference vector.
             metric:           "cosine", "l2", or "ip".
             top_k:            Number of results.
@@ -529,25 +551,30 @@ class Database:
             list of dicts with keys face_id, image_uuid, azure_blob_url,
             cluster_id, bbox, embedding (list), distance (float).
         """
+        event_id = await self.get_event_id(event_code)
+
         op = {"cosine": "<=>", "l2": "<->", "ip": "<#>"}[metric]
         vec_txt = "[" + ",".join(map(str, target_embedding)) + "]"
 
         sql = f"""
-            SELECT
-                f.id              AS face_id,
-                f.image_uuid,
-                i.azure_blob_url,
-                f.cluster_id,
-                f.bbox,
-                f.embedding::text AS embedding,
-                f.embedding {op} '{vec_txt}'::vector AS distance
-            FROM faces AS f
-            JOIN images AS i
-              ON i.uuid = f.image_uuid
-            ORDER BY distance
-            LIMIT $1
+        SELECT f.id AS face_id,
+            f.image_uuid,
+            i.azure_blob_url,
+            f.cluster_id,
+            f.bbox,
+            CAST(f.embedding AS text) AS embedding,      -- ← add this line
+            f.embedding {op} '{vec_txt}'::vector AS distance
+        FROM faces f
+        JOIN images i ON i.uuid = f.image_uuid
+        WHERE f.event_id = $1
+        ORDER BY distance
+        LIMIT $2
         """
-        rows = await self.string_query(sql, top_k)
+        rows = await self.string_query(
+            sql,
+            event_id,
+            top_k,
+        )
 
         def _parse(txt: str) -> List[float]:
             return [float(x) for x in txt.strip("[]").split(",")]
@@ -561,12 +588,14 @@ class Database:
             results.append(d)
         return results
 
-    async def get_all_embeddings(self) -> List[Dict[str, Any]]:
+    async def get_all_embeddings(self, event_code: str) -> List[Dict[str, Any]]:
         """
         Return every face-row embedding as a Python list of floats.
         """
+        event_id = await self.get_event_id(event_code)
         rows = await self.string_query(
-            "SELECT id AS face_id, embedding::text AS emb FROM faces ORDER BY id"
+            "SELECT id AS face_id, embedding::text AS emb FROM faces WHERE event_id = $1 ORDER BY id",
+            event_id,
         )
 
         def _parse(txt: str) -> List[float]:

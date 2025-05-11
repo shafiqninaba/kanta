@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -52,6 +53,8 @@ load_dotenv()
 
 CONTAINER_NAME: str = os.getenv("AZURE_CONTAINER_NAME", "images")
 _resources: Dict[str, Any] = {}
+
+EVENT_CODE = os.getenv("EVENT_CODE", "spring2026_salt_shira")
 
 
 # ─── Pydantic response models ───────────────────────────────────────────
@@ -205,6 +208,16 @@ async def lifespan(app: FastAPI):
     _resources["db"] = db
     logger.success("✅ Database pool ready")
 
+    # Ensure the event row exists (idempotent)
+    await db.string_query(
+        """
+        INSERT INTO events(code, name)
+        VALUES($1, 'Event for testing')
+        ON CONFLICT (code) DO NOTHING
+        """,
+        EVENT_CODE,
+    )
+
     try:
         yield
     finally:
@@ -257,6 +270,11 @@ def get_container():
     summary="Upload an image, detect faces, store in Azure + DB",
 )
 async def upload_image(
+    event_code: str = Query(
+        EVENT_CODE,
+        description="Event code to associate with this image",
+        regex=r"^[a-zA-Z0-9_]+$",
+    ),
     image: UploadFile = File(...),
     db: Database = Depends(get_db),
 ):
@@ -290,7 +308,10 @@ async def upload_image(
     container = get_container()
     uid = uuid.uuid4().hex
     ext = (image.filename or "upload").split(".")[-1].lower()
-    blob_name = f"uploads/{uid}.{ext}"
+    event_code_sanitized = re.sub(
+        r"[^a-z0-9]", "_", event_code
+    )  # Sanitize EVENT_CODE to lowercase and remove special characters
+    blob_name = f"{event_code_sanitized}/{uid}.{ext}"
     try:
         logger.info(f"Uploading image {uid} to Azure Blob Storage")
         container.upload_blob(
@@ -298,6 +319,7 @@ async def upload_image(
             data=raw,
             overwrite=True,
             metadata={
+                "event_code": event_code,
                 "uuid": uid,
                 "faces": str(len(embeddings)),
                 "boxes": json.dumps(boxes),
@@ -315,6 +337,7 @@ async def upload_image(
     # 4) Persist image row
     logger.info(f"Inserting image {uid} into DB")
     await db.insert_image(
+        event_code=event_code,
         image_uuid=uid,
         azure_blob_url=blob_url,
         faces=len(embeddings),
@@ -327,6 +350,7 @@ async def upload_image(
     logger.info(f"Inserting {len(embeddings)} faces into DB")
     for box, emb in zip(boxes, embeddings):
         await db.insert_face(
+            event_code=EVENT_CODE,
             image_uuid=uid,
             bbox={
                 "x": box[3],
@@ -354,6 +378,11 @@ async def upload_image(
     summary="List stored images with optional filters & pagination",
 )
 async def get_pics(
+    event_code: str = Query(
+        EVENT_CODE,
+        description="Event code to filter images",
+        regex=r"^[a-zA-Z0-9_]+$",
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     date_from: Optional[datetime] = Query(None),
@@ -371,6 +400,7 @@ async def get_pics(
     - `cluster_list_id`: only images having at least one face in any of these clusters.
     """
     rows = await db.get_images(
+        event_code=event_code,
         limit=limit,
         offset=offset,
         date_from=(date_from.replace(tzinfo=None) if date_from else None),
@@ -448,6 +478,11 @@ async def delete_pic(
     summary="Either show cluster summary or redirect by cluster_ids → /pics",
 )
 async def clusters(
+    event_code: str = Query(
+        EVENT_CODE,
+        description="Event code to filter images",
+        regex=r"^[a-zA-Z0-9_]+$",
+    ),
     cluster_ids: Optional[List[int]] = Query(None, alias="cluster_ids"),
     sample_size: int = Query(5, ge=1, le=20),
     db: Database = Depends(get_db),
@@ -461,7 +496,7 @@ async def clusters(
     #     qs = "&".join(f"cluster_list_id={c}" for c in cluster_ids)
     #     return RedirectResponse(url=f"/pics?{qs}", status_code=307)
 
-    summary = await db.get_cluster_info(sample_size=sample_size)
+    summary = await db.get_cluster_info(event_code=event_code, sample_size=sample_size)
     return [ClusterInfo(**c) for c in summary]
 
 
@@ -471,6 +506,11 @@ async def clusters(
     summary="Find the top-K most similar faces to the one you upload",
 )
 async def find_similar(
+    event_code: str = Query(
+        EVENT_CODE,
+        description="Event code to filter images",
+        regex=r"^[a-zA-Z0-9_]+$",
+    ),
     image: UploadFile = File(..., description="Face image → exactly one face"),
     metric: str = Query(
         "cosine", description="Metric: 'cosine' or 'l2'", regex="^(cosine|l2)$"
@@ -500,6 +540,7 @@ async def find_similar(
     emb = face_recognition.face_encodings(img_np, boxes)[0].tolist()
     logger.info("Searching top-%d by %s distance…", top_k, metric)
     hits = await db.similarity_search(
+        event_code=event_code,
         target_embedding=emb,
         metric=metric,
         top_k=top_k,
