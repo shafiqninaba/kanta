@@ -1,9 +1,10 @@
 import os
-from typing import Optional, Any
-from loguru import logger
+from typing import Any, Optional
+
 from azure.core.exceptions import ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
+from loguru import logger
 
 
 def setup_blob_service_client(

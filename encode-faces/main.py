@@ -6,10 +6,13 @@ A micro‑service to:
 
 1. **POST /upload-image** – Upload an image (any picture), detect faces
    and bounding boxes (if present), store the file in Azure Blob Storage,
-   and return metadata.
+   update the images and faces tables in the database, and return metadata.
+
 2. **GET /pics** – List stored pictures with optional filters and
    stateless pagination.
+
 3. **GET /pics/{uuid}** – Retrieve metadata for a single picture.
+
 4. **GET /health** – Liveness / readiness probe.
 """
 
@@ -45,16 +48,25 @@ _resources: Dict[str, Any] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialise and dispose of the Azure Blob client."""
-    logger.info("Initialising Azure Blob client…")
+    """Setup resources on startup, e.g. the Azure Blob Storage Client and Database Connection."""
+    logger.info("Initialising Azure Blob Storage Client…")
     _resources["blob"] = setup_blob_service_client(
         connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING") or None,
     )
-    logger.info("Azure Blob client sucessfully initialised")
+    logger.info("Azure Blob Storage Client sucessfully initialised")
+
+    logger.info("Initialising Database Connection…")
+    # _resources["db"] = setup_db_connection()
+    logger.info("Database Connection sucessfully initialised")
+
     try:
         yield
     finally:
-        logger.info("Shutting down – releasing Azure Blob client")
+        logger.info(
+            "Shutting down – releasing Azure Blob client and Database Connection…"
+        )
+        # _resources["blob"].close()
+        # _resources["db"].close()
         _resources.clear()
 
 
@@ -74,11 +86,9 @@ app.add_middleware(
 
 
 # endpoints
-
-
 @app.post("/upload-image/", response_model=Dict[str, Any])
 async def upload_image(image: UploadFile = File(...)) -> Dict[str, Any]:
-    """Upload an image, detect faces, and persist to Azure.
+    """Upload an image, detect faces and coordinates (and generate embeddings), and persist to Azure Blob Storage, Database.
 
     Workflow:
         1. **Validate** the incoming file is an image.
@@ -86,7 +96,9 @@ async def upload_image(image: UploadFile = File(...)) -> Dict[str, Any]:
         3. **Detect** faces & bounding boxes (`face_recognition` HOG model).
         4. **Generate** 128‑D embeddings for each detected face.
         5. **Upload** raw bytes to Azure Blob Storage under a UUID path.
-        6. **Return** the blob URL + metadata (face count, embeddings, boxes).
+        6  **Update** the image database with the image metadata (UUID, faces, boxes).
+        7  **Update** the faces database with the image UUID and face embeddings.
+        8. **Return** the blob URL + metadata (face count, embeddings, boxes).
 
     Args:
         image: Multipart file sent by the client.
@@ -119,17 +131,21 @@ async def upload_image(image: UploadFile = File(...)) -> Dict[str, Any]:
 
     # Detect faces & embeddings
     logger.info("Detecting faces & generating embeddings…")
-    detect_t0 = time.perf_counter()
-    boxes: List[List[int]] = face_recognition.face_locations(img_np, model="hog")
-    embeddings = face_recognition.face_encodings(img_np, boxes) if boxes else []
-    detect_time = time.perf_counter() - detect_t0
+    try:
+        detect_t0 = time.perf_counter()
+        boxes: List[List[int]] = face_recognition.face_locations(img_np, model="hog")
+        embeddings = face_recognition.face_encodings(img_np, boxes) if boxes else []
+        detect_time = time.perf_counter() - detect_t0
 
-    if len(boxes) != len(embeddings):
-        logger.warning(
-            "Mismatch between boxes (%d) and embeddings (%d)",
-            len(boxes),
-            len(embeddings),
-        )
+        if len(boxes) != len(embeddings):
+            logger.warning(
+                "Mismatch between boxes (%d) and embeddings (%d)",
+                len(boxes),
+                len(embeddings),
+            )
+    except Exception as e:
+        logger.exception("Face detection failed")
+        raise HTTPException(status_code=500, detail="Face detection failed") from e
 
     # Prepare Azure container
     blob_service = _resources["blob"]
@@ -139,27 +155,30 @@ async def upload_image(image: UploadFile = File(...)) -> Dict[str, Any]:
     except ResourceExistsError:
         pass  # already exists
 
-    # Blob details
-    uuid_ = uuid.uuid4().hex
-    ext = (image.filename or "upload").split(".")[-1].lower()
-    blob_name = f"uploads/{uuid_}.{ext}"
-    metadata = {
-        "uuid": uuid_,
-        "faces": str(len(embeddings)),
-        "boxes": json.dumps(boxes),
-    }
-
     # Upload
     logger.info("Uploading image to Azure Blob Storage…")
     try:
+        # Blob details
+        uuid_ = uuid.uuid4().hex
+        ext = (image.filename or "upload").split(".")[-1].lower()
+        blob_name = f"uploads/{uuid_}.{ext}"
+        metadata = {
+            "uuid": uuid_,
+            "faces": str(len(embeddings)),
+            "boxes": json.dumps(boxes),
+        }
         container.upload_blob(
             name=blob_name, data=data, overwrite=True, metadata=metadata
         )
     except Exception as exc:
         logger.exception("Upload failed")
         raise HTTPException(status_code=500, detail="Failed to upload image") from exc
-    upload_time = time.perf_counter() - detect_t0 - detect_time
 
+    # INSERT into images database (not implemented)
+
+    # INSERT into faces database (not implemented)
+
+    upload_time = time.perf_counter() - detect_t0 - detect_time
     logger.info(
         "Upload successful – load: %.2fs | detect: %.2fs | upload: %.2fs | faces: %d | uuid: %s",
         load_time,
@@ -187,18 +206,18 @@ async def list_pics(
 ) -> Dict[str, Any]:
     """List stored pictures with optional filters & pagination.
 
-    #     Args:
-    #         limit: Max number of blobs to return (1‑200).
-    #         continuation_token: Cursor for the next page (from previous response).
-    #         date_from / date_to: Server‑side filtering by blob `last_modified`.
-    #         faces_min / faces_max: Filter using blob metadata (`faces`).
+    Args:
+        limit: Max number of blobs to return (1‑200).
+        continuation_token: Cursor for the next page (from previous response).
+        date_from / date_to: Server‑side filtering by blob `last_modified`.
+        faces_min / faces_max: Filter using blob metadata (`faces`).
 
-    #     Returns:
-    #         {
-    #           "items": [ {uuid, blob_url, faces, boxes, last_modified}, … ],
-    #           "next_token": str | null
-    #         }
-    #"""
+    Returns:
+        {
+            "pictures": [ {uuid, blob_url, faces, boxes, last_modified}, … ],
+            "next_token": str | null
+        }
+    """
     blob_service = _resources["blob"]
     container = blob_service.get_container_client(CONTAINER_NAME)
 
@@ -210,13 +229,13 @@ async def list_pics(
     ).by_page(continuation_token)
 
     try:
-        # Step 2 ── fetch the *first* page only
+        # Fetch the *first* page only
         first_page = next(list_paged)
     except StopIteration:
         # Empty container or continuation token was beyond the end
         return {"items": [], "next_token": None}
 
-    items: List[Dict[str, Any]] = []
+    pictures: List[Dict[str, Any]] = []
     for blob in first_page:
         # For now. don't implement client-side filtering, default to no filters so frontend can scroll infintely.
         # Azure Blob Sotrage is not a database, so we can't filter on metadata or tags easily
@@ -235,7 +254,7 @@ async def list_pics(
         #     continue
 
         meta = blob.metadata or {}
-        items.append(
+        pictures.append(
             {
                 "uuid": meta.get("uuid") or blob.name.split("/")[-1].split(".")[0],
                 "blob_url": container.get_blob_client(blob).url,
@@ -249,7 +268,7 @@ async def list_pics(
     # Expose the continuation token for the next page
     # If the page is empty, the token will be None
     next_token = list_paged.continuation_token
-    return {"items": items, "next_token": next_token}
+    return {"pictures": pictures, "next_token": next_token}
 
 
 @app.get("/blob/pics/{uuid}", response_model=Dict[str, Any])
@@ -296,10 +315,13 @@ async def get_health_status() -> Dict[str, str]:
         Simple JSON object indicating API and Azure connection status.
     """
     azure_status = "connected" if "blob" in _resources else "disconnected"
+    database_status = "connected"  # if "db" in _resources else "disconnected"
+
     return {
-        "status": "healthy",
+        "status": "healthy" if azure_status == "connected" else "unhealthy",
         "message": "Face Encoding API is operational",
         "azure_connection": azure_status,
+        "database_connection": database_status,
     }
 
 
@@ -307,6 +329,6 @@ if __name__ == "__main__":  # pragma: no cover
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8005)),
+        port=int(os.getenv("PORT", 8000)),
         reload=os.getenv("DEV") == "1",
     )
