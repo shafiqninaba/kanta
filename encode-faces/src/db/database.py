@@ -177,25 +177,26 @@ class Database:
         Raises:
             ValueError if `code` is already taken.
         """
-        # check for pre-existence
-        exists = await self.string_query(
-            "SELECT 1 FROM events WHERE code = $1",
-            event_code,
-        )
-        if exists:
-            raise ValueError(f"Event code '{event_code}' already exists")
+        # # check for pre-existence
+        # exists = await self.string_query(
+        #     "SELECT 1 FROM events WHERE code = $1",
+        #     event_code,
+        # )
+        # if exists:
+        #     raise ValueError(f"Event code '{event_code}' already exists")
 
         row = await self.string_query(
             """
             INSERT INTO events(code, name, start_time)
             VALUES($1, $2, $3)
+            ON CONFLICT(code) DO NOTHING
             RETURNING id
             """,
             event_code,
             name,
             start_time,
         )
-        return row[0]["id"]
+        return row[0]["id"] if row else None
 
     async def get_event_by_code(self, event_code: str) -> Dict[str, Any]:
         """

@@ -218,37 +218,43 @@ class ORMDatabase:  # noqa: D101 – full docstring below
         self,
         *,
         event_code: str,
+        limit: int = 50,
+        offset: int = 0,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         min_faces: Optional[int] = None,
         max_faces: Optional[int] = None,
-        limit: int = 50,
-        offset: int = 0,
+        cluster_list_id: Optional[List[int]] = None,
     ) -> List[Image]:
         """
-        Retrieve images with optional face-count filters and pagination.
+        Retrieve images belonging to a given event, with optional filters
+        and pagination.
 
         Args:
-            event_code: Event code to filter images.
-            date_from: Start date for filtering.
-            date_to: End date for filtering.
-            min_faces: Minimum face count.
-            max_faces: Maximum face count.
-            limit: Max rows to return.
-            offset: Rows to skip.
+            event_code:       Event code to scope the query.
+            limit:            Max rows to return (default: 50).
+            offset:           Rows to skip (default: 0).
+            date_from:        Only include images created on/after this timestamp.
+            date_to:          Only include images created on/before this timestamp.
+            min_faces:        Minimum number of faces in the image.
+            max_faces:        Maximum number of faces in the image.
+            cluster_list_id:  If provided, only images having ≥1 face in any of these clusters.
 
         Returns:
-            List of Image ORM instances (faces relation eagerly loaded).
+            A list of `Image` ORM instances (with `.faces_rel` eagerly loaded),
+            ordered by descending creation time.
         """
+        # 1) resolve event_id
         event_id = await self.get_event_id(event_code)
 
+        # 2) build base statement
         stmt = (
             select(Image)
             .options(selectinload(Image.faces_rel))
             .where(Image.event_id == event_id)
         )
 
-        # Apply optional filters
+        # 3) apply image‐level filters
         if date_from:
             stmt = stmt.where(Image.created_at >= date_from)
         if date_to:
@@ -258,18 +264,42 @@ class ORMDatabase:  # noqa: D101 – full docstring below
         if max_faces is not None:
             stmt = stmt.where(Image.faces <= max_faces)
 
-        stmt = stmt.order_by(Image.created_at.desc()).limit(limit).offset(offset)
-        async with self.Session() as ses:
-            return (await ses.scalars(stmt)).unique().all()
+        # 4) optional cluster filter (join + WHERE + DISTINCT)
+        if cluster_list_id:
+            stmt = (
+                stmt.join(
+                    Image.faces_rel
+                )  # INNER JOIN faces AS f ON f.image_id = Image.id
+                .where(Face.cluster_id.in_(cluster_list_id))
+                .distinct()
+            )
 
-    async def get_image_by_uuid(self, *, uuid: str) -> Optional[Image]:
+        # 5) ordering & pagination
+        stmt = stmt.order_by(Image.created_at.desc()).limit(limit).offset(offset)
+
+        # 6) execute
+        async with self.Session() as ses:
+            result = await ses.execute(stmt)
+            # unique().scalars() ensures no duplicates if we joined + distinct
+            return result.unique().scalars().all()
+
+    async def get_image_by_uuid(
+        self,
+        *,
+        uuid: str,
+    ) -> Optional[Image]:
         """
-        Fetch a single image by UUID (includes faces). Returns None if missing.
+        Fetch a single image (and its faces) by UUID, scoped to an event.
+
         Args:
-            uuid: UUID of the image to fetch.
+            event_code: Event code to scope the query.
+            uuid:       32-char UUID of the image.
+
         Returns:
-            The Image ORM instance if found, otherwise None.
+            The `Image` ORM instance with `.faces_rel` populated, or None if not found
+            or not part of the specified event.
         """
+        # 1) build query
         stmt = (
             select(Image)
             .options(selectinload(Image.faces_rel))
@@ -277,6 +307,7 @@ class ORMDatabase:  # noqa: D101 – full docstring below
             .limit(1)
         )
 
+        # 3) execute
         async with self.Session() as ses:
             return await ses.scalar(stmt)
 

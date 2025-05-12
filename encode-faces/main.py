@@ -63,8 +63,6 @@ _resources: Dict[str, Any] = {}
 
 
 # Pydantic response models
-
-
 class EventIn(BaseModel):
     """
     Input model for creating an event.
@@ -240,14 +238,11 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Failed to connect to database: {e}")
         raise HTTPException(status_code=500, detail="Database connection failed")
 
-    # Ensure the event row exists
-    await db.string_query(
-        """
-        INSERT INTO events(code, name)
-        VALUES($1, 'Event for testing')
-        ON CONFLICT (code) DO NOTHING
-        """,
-        EVENT_CODE,
+    # Ensure the default event row exists
+    await db.insert_event(
+        event_code=EVENT_CODE,
+        name="Event for testing",
+        start_time=datetime.now(timezone.utc).replace(tzinfo=None),
     )
 
     try:
@@ -291,8 +286,6 @@ def get_container():
 
 
 # Endpoints
-
-
 @app.post(
     "/events/create", response_model=EventInfo, status_code=status.HTTP_201_CREATED
 )
@@ -316,8 +309,18 @@ async def create_event(
     """
     Create a new event. Error if `code` is already used.
     """
+    # check for pre-existence
+    exists = await db.string_query(
+        "SELECT 1 FROM events WHERE code = $1",
+        event_code,
+    )
+    if exists:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Event code '{event_code}' already exists",
+        )
     try:
-        eid = await db.insert_event(
+        await db.insert_event(
             event_code=event_code,
             name=event_name,
             start_time=start_time,
@@ -438,34 +441,42 @@ async def upload_image(
 
     # 4) Persist image row
     logger.info(f"Inserting image with uuid: {uid} into DB")
-    await db.insert_image(
-        event_code=event_code,
-        image_uuid=uid,
-        azure_blob_url=blob_url,
-        faces=len(embeddings),
-        created_at=props.creation_time,
-        last_modified=props.last_modified,
-    )
-    logger.success(f"Succesfully inserted image with uuid: {uid} into DB")
+    try:
+        await db.insert_image(
+            event_code=event_code,
+            image_uuid=uid,
+            azure_blob_url=blob_url,
+            faces=len(embeddings),
+            created_at=props.creation_time,
+            last_modified=props.last_modified,
+        )
+        logger.success(f"Succesfully inserted image with uuid: {uid} into DB")
+    except Exception as e:
+        logger.error(f"Failed to insert image into DB: {e}")
+        raise HTTPException(500, "Failed to insert image into DB")
 
     # 5) Persist face rows
     logger.info(f"Inserting {len(embeddings)} faces from image: {uid} into DB")
-    for box, emb in zip(boxes, embeddings):
-        await db.insert_face(
-            event_code=EVENT_CODE,
-            image_uuid=uid,
-            bbox={
-                "x": box[3],
-                "y": box[0],
-                "width": box[1] - box[3],
-                "height": box[2] - box[0],
-            },
-            embedding=emb.tolist(),
-            cluster_id=-2,  # consider the best default value:
+    try:
+        for box, emb in zip(boxes, embeddings):
+            await db.insert_face(
+                event_code=EVENT_CODE,
+                image_uuid=uid,
+                bbox={
+                    "x": box[3],
+                    "y": box[0],
+                    "width": box[1] - box[3],
+                    "height": box[2] - box[0],
+                },
+                embedding=emb.tolist(),
+                cluster_id=-2,  # consider the best default value:
+            )
+        logger.success(
+            f"Sucessfully inserted {len(embeddings)} faces from image: {uid} into DB"
         )
-    logger.success(
-        f"Sucessfully inserted {len(embeddings)} faces from image: {uid} into DB"
-    )
+    except Exception as e:
+        logger.error(f"Failed to insert faces into DB: {e}")
+        raise HTTPException(500, "Failed to insert faces into DB")
 
     return UploadResp(
         uuid=uid,
@@ -556,7 +567,7 @@ async def delete_pic(
     # 1) Look for an existing blob under any of our known extensions
     found = False
     for ext in ("jpg", "jpeg", "png", "gif", "webp"):
-        blob_name = f"uploads/{uuid}.{ext}"
+        blob_name = f"{EVENT_CODE}/{uuid}.{ext}"
         bc = container.get_blob_client(blob_name)
 
         if bc.exists():  # or: await bc.exists() if using async client
@@ -727,6 +738,10 @@ async def find_similar(
 
 @app.get("/health", summary="Liveness/readiness probe")
 async def health() -> Dict[str, str]:
+    """
+    Check the health of the service by verifying the connection to Azure Blob Storage
+    and the database.
+    """
     azure_status = "blob" in _resources
     db_status = "db" in _resources
     healthy = azure_status and db_status
