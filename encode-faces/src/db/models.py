@@ -3,9 +3,10 @@ SQLAlchemy declarative models for events, images, and faces
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, func, JSON
-from sqlalchemy.orm import declarative_base, relationship
+
 from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 

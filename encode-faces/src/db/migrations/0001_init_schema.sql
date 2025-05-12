@@ -1,6 +1,7 @@
 -- 0001_init_schema.sql
 -- ------------------------------------------------------------------
 -- 1) Enable pgvector extension (must be allowed in Azure Portal first)
+-- Visit https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-allow-extensions?tabs=allow-extensions-portal#allow-extensions
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- 2) Drop old tables in reverse-dependency order
@@ -13,12 +14,9 @@ DROP TABLE IF EXISTS events;
 ------------------------------------------------------------------*/
 CREATE TABLE events (
     id          SERIAL       PRIMARY KEY,
-    code        VARCHAR(32)  UNIQUE NOT NULL,
-      -- opaque slug/UUID in QR, e.g. 'spring24'
-    name        TEXT,
-      -- human-readable name, e.g. 'Alice & Bob Wedding'
-    start_time  TIMESTAMPTZ,
-      -- event start (ISO 8601)
+    code        VARCHAR(32)  UNIQUE NOT NULL, -- opaque slug/UUID in QR code, e.g. 'spring24'
+    name        TEXT, -- human-readable name, e.g. 'Alice & Bob Wedding'
+    start_time  TIMESTAMPTZ, -- event start (ISO 8601)
     created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 

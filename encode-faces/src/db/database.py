@@ -1,9 +1,9 @@
 """
 database.py
 ===========
-Async PostgreSQL helper for **images** and **faces** tables.
+Async PostgreSQL helper for **events**, **images** and **faces** tables.
 
-This module provides a high-level interface to the *images* and *faces* tables
+This module provides a high-level interface to the **events**, *images* and *faces* tables
 in a PostgreSQL database hosted on Azure, using the `asyncpg` library.
 
 It manages a connection pool and executes SQL queries asynchronously using Python's
@@ -11,6 +11,7 @@ It manages a connection pool and executes SQL queries asynchronously using Pytho
 database operations are critical.
 
 The schema includes:
+- `events`: event metadata (code, name, timestamps)
 - `images`: image metadata (UUID, blob URL, timestamps, file extension)
 - `faces`: face metadata and embeddings linked to an image
 
@@ -24,6 +25,14 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import asyncpg
+
+
+def _parse(txt: str) -> List[float]:
+    """
+    Convert a string representation of a list to a Python list of floats.
+    PgSQL stores vectors as strings like "[1.0,2.0,3.0]".
+    """
+    return [float(x) for x in txt.strip("[]").split(",")]
 
 
 class Database:
@@ -125,11 +134,20 @@ class Database:
             raise RuntimeError(f"string_query failed: {exc}") from exc
 
     # Event helper
+    # All public methods are *event‑aware*: the caller supplies an `event_code`, we
+    # resolve it once to `event_id`, and every query/insert/update is scoped to that
+    # event.
     # ======================================================================
     async def get_event_id(self, event_code: str) -> int:
-        """
-        Resolve an event_code to its integer primary key.
-        Raises ValueError if no such event exists.
+        """Get the event ID for a given event code.
+        Args:
+            event_code: The event code to look up.
+
+        Returns:
+            The event ID corresponding to the event code.
+
+        Raises:
+            ValueError: If the event code is unknown.
         """
         rows = await self.string_query(
             "SELECT id FROM events WHERE code = $1",
@@ -138,6 +156,88 @@ class Database:
         if not rows:
             raise ValueError(f"Unknown event code: {event_code}")
         return rows[0]["id"]
+
+    async def insert_event(
+        self,
+        event_code: str,
+        name: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+    ) -> int:
+        """
+        Insert a new event. Error if code already exists.
+
+        Args:
+            code:       Unique event code.
+            name:       Optional display name.
+            start_time: Optional event start timestamp.
+
+        Returns:
+            The new event's ID.
+
+        Raises:
+            ValueError if `code` is already taken.
+        """
+        # check for pre-existence
+        exists = await self.string_query(
+            "SELECT 1 FROM events WHERE code = $1",
+            event_code,
+        )
+        if exists:
+            raise ValueError(f"Event code '{event_code}' already exists")
+
+        row = await self.string_query(
+            """
+            INSERT INTO events(code, name, start_time)
+            VALUES($1, $2, $3)
+            RETURNING id
+            """,
+            event_code,
+            name,
+            start_time,
+        )
+        return row[0]["id"]
+
+    async def get_event_by_code(self, event_code: str) -> Dict[str, Any]:
+        """
+        Fetch one event row by its code.
+
+        Returns:
+            { "id", "code", "name", "start_time", "created_at" }
+
+        Raises:
+            ValueError if not found.
+        """
+        rows = await self.string_query(
+            """
+            SELECT id, code, name, start_time, created_at
+            FROM events
+            WHERE code = $1
+            """,
+            event_code,
+        )
+        if not rows:
+            raise ValueError(f"Unknown event code: {event_code}")
+        return dict(rows[0])
+
+    async def delete_event_by_code(self, event_code: str) -> None:
+        """
+        Delete an event by its code.
+        """
+        await self.string_query(
+            "DELETE FROM events WHERE code = $1",
+            event_code,
+        )
+
+        """
+        Delete an event row by its code.
+
+        Args:
+            event_code:  Code of the event to delete.
+        """
+        await self.string_query(
+            "DELETE FROM events WHERE code = $1",
+            event_code,
+        )
 
     # Images
     # ======================================================================
@@ -163,6 +263,7 @@ class Database:
             last_modified:  Timestamp when the image was last modified.
         """
         event_id = await self.get_event_id(event_code)
+
         await self.string_query(
             """
             INSERT INTO images(
@@ -209,6 +310,7 @@ class Database:
             List of image rows as dicts; uses DISTINCT when filtering by cluster.
         """
         event_id = await self.get_event_id(event_code)
+
         params: List[Any] = [event_id]
         where_clauses = ["i.event_id = $1"]
         join_cluster = ""
@@ -217,6 +319,7 @@ class Database:
             params.append(val)
             where_clauses.append(f"{cond} ${len(params)}")
 
+        # Add filters to the WHERE clause
         if date_from:
             _add("i.created_at >=", date_from)
         if date_to:
@@ -225,6 +328,8 @@ class Database:
             _add("i.faces >=", min_faces)
         if max_faces is not None:
             _add("i.faces <=", max_faces)
+
+        # If cluster_list_id is provided, join with faces table and filter
         if cluster_list_id:
             params.append(cluster_list_id)
             idx = len(params)
@@ -332,6 +437,7 @@ class Database:
         Insert a new face record for the given image UUID.
 
         Args:
+            event_code: Event code (string).
             image_uuid: 32-character UUID of the parent image.
             bbox:       Dict with keys "x","y","width","height".
             embedding:  128-dimensional embedding vector.
@@ -576,9 +682,6 @@ class Database:
             top_k,
         )
 
-        def _parse(txt: str) -> List[float]:
-            return [float(x) for x in txt.strip("[]").split(",")]
-
         results: List[Dict[str, Any]] = []
         for rec in rows:
             d = dict(rec)
@@ -593,13 +696,11 @@ class Database:
         Return every face-row embedding as a Python list of floats.
         """
         event_id = await self.get_event_id(event_code)
+
         rows = await self.string_query(
             "SELECT id AS face_id, embedding::text AS emb FROM faces WHERE event_id = $1 ORDER BY id",
             event_id,
         )
-
-        def _parse(txt: str) -> List[float]:
-            return [float(x) for x in txt.strip("[]").split(",")]
 
         return [{"face_id": r["face_id"], "embedding": _parse(r["emb"])} for r in rows]
 

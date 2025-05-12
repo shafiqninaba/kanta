@@ -11,8 +11,8 @@ import urllib.parse
 from typing import AsyncGenerator
 
 import asyncpg
-import pytest_asyncio
 import pytest
+import pytest_asyncio
 
 
 def _build_dsn() -> str:

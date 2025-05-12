@@ -1,2 +1,2 @@
-ALTER TABLE images
+ALTER TABLE events
 ADD COLUMN IF NOT EXISTS description TEXT;

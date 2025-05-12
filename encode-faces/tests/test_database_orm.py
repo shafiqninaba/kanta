@@ -16,6 +16,7 @@ from src.db.database_orm import ORMDatabase
 
 EVENT_CODE = "testevt"  # each test runs inside this temporary event
 
+
 # ----------------------------------------------------------------------
 # Fixture
 # ----------------------------------------------------------------------
@@ -42,6 +43,7 @@ async def db() -> ORMDatabase:
     )
     yield inst
     await inst.close()
+
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -76,6 +78,7 @@ async def _insert_faces(
         ids.append(face.id)
     return ids
 
+
 # ----------------------------------------------------------------------
 # Tests
 # ----------------------------------------------------------------------
@@ -100,7 +103,7 @@ async def test_get_image_by_uuid_and_faces(db: ORMDatabase) -> None:
     u = await _insert_image(db)
     face_ids = await _insert_faces(db, image_uuid=u, n=3, start=0.3)
 
-    img = await db.get_image_by_uuid(event_code=EVENT_CODE, uuid=u)
+    img = await db.get_image_by_uuid(uuid=u)
     assert img is not None
     rel_ids = [f.id for f in img.faces_rel]
     assert set(face_ids) <= set(rel_ids)
@@ -112,7 +115,9 @@ async def test_similarity_search_orm(db: ORMDatabase) -> None:
     await _insert_faces(db, image_uuid=u, n=1, start=0.42)
     ref = [0.42] * 128
 
-    hits = await db.similarity_search(event_code=EVENT_CODE, target_embedding=ref, metric="cosine", top_k=2)
+    hits = await db.similarity_search(
+        event_code=EVENT_CODE, target_embedding=ref, metric="cosine", top_k=2
+    )
     assert hits, "similarity_search returned no hits"
 
 
@@ -132,7 +137,7 @@ async def test_update_cluster_ids_and_reflect(db: ORMDatabase) -> None:
     fids = await _insert_faces(db, image_uuid=u, n=2)
     await db.update_cluster_ids(EVENT_CODE, {fids[0]: 7, fids[1]: 8})
 
-    img = await db.get_image_by_uuid(event_code=EVENT_CODE, uuid=u)
+    img = await db.get_image_by_uuid(uuid=u)
     clusters = {f.cluster_id for f in img.faces_rel}
     assert {7, 8} <= clusters
 
@@ -153,7 +158,7 @@ async def test_raw_query_and_cascade_delete_orm(db: ORMDatabase) -> None:
     await _insert_faces(db, image_uuid=u, n=3)
 
     before_cnt = (await db.string_query("SELECT COUNT(*) AS cnt FROM faces"))[0]["cnt"]
-    await db.delete_image(event_code=EVENT_CODE, uuid=u)
+    await db.delete_image_by_uuid(uuid=u)
     after_cnt = (await db.string_query("SELECT COUNT(*) AS cnt FROM faces"))[0]["cnt"]
 
     assert after_cnt < before_cnt, "faces not cascaded after image deletion"

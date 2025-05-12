@@ -1,2 +1,2 @@
-ALTER TABLE images
-RENAME COLUMN description TO new_description;
+ALTER TABLE events
+RENAME COLUMN name TO event_name;

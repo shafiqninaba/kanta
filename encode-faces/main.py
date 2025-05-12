@@ -2,16 +2,21 @@
 main.py – Face Encoding Service
 ===============================
 
-FastAPI micro‑service to:
+FastAPI micro-service to:
 
-1. **POST /upload-image**      – Detect faces, upload image to Azure Blob, persist to DB.
-2. **GET /pics**               – List stored images with optional filters (incl. clusters).
-3. **GET /pics/{uuid}**        – Metadata for a single image and its faces.
-4. **DELETE /pics/{uuid}**     – Delete an image (rows + blob).
-5. **GET /clusters**           – Summary per cluster (counts + samples).
-6. **GET /blob/pics**          – Unchanged Azure Blob listing (infinite scroll).
-7. **GET /blob/pics/{uuid}**   – Metadata from Azure Blob Storage.
-8. **GET /health**             – Liveness / readiness probe.
+1. **POST /upload-image**      – Detect faces, upload image to Azure Blob, persist to Azure Postgres DB.
+2. **POST /events**            – Create a new event (code, optional name & start_time).
+3. **GET /events/{code}**      – Retrieve an event’s details by its code.
+4. **DELETE /events/{code}**   – Delete an event (and all associated data).
+5. **GET /pics**               – List stored images with optional filters (incl. clusters).
+6. **GET /pics/{uuid}**        – Metadata for a single image and its faces.
+7. **DELETE /pics/{uuid}**     – Delete an image (rows + blob).
+8. **GET /clusters**           – Summary per cluster (counts + samples).
+9. **GET /health**             – Liveness / readiness probe.
+
+Deprecated:
+- **GET /blob/pics**          – Infinite‐scroll listing of raw Azure blobs.
+- **GET /blob/pics/{uuid}**   – Metadata for a single raw Azure blob.
 """
 
 from __future__ import annotations
@@ -43,24 +48,48 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
-from pydantic import BaseModel, Field
 from PIL import Image
+from pydantic import BaseModel, Field
 
 from src.db.database import Database
 from src.utils.azure_blob_storage import setup_blob_service_client
 
 load_dotenv()
 
+
+EVENT_CODE = os.getenv("EVENT_CODE", "spring2026_salt_shira")
 CONTAINER_NAME: str = os.getenv("AZURE_CONTAINER_NAME", "images")
 _resources: Dict[str, Any] = {}
 
-EVENT_CODE = os.getenv("EVENT_CODE", "spring2026_salt_shira")
+
+# Pydantic response models
 
 
-# ─── Pydantic response models ───────────────────────────────────────────
+class EventIn(BaseModel):
+    """
+    Input model for creating an event.
+    """
+
+    code: str = Field(..., example="spring24")
+    name: Optional[str] = Field(None, example="Alice & Bob Wedding")
+    start_time: Optional[datetime] = Field(
+        None, description="ISO-8601 timestamp of event start, e.g. 2025-06-01T15:00:00Z"
+    )
 
 
-class ImageOut(BaseModel):
+class EventInfo(BaseModel):
+    """
+    Output model for event data.
+    """
+
+    id: int
+    code: str
+    name: Optional[str]
+    start_time: Optional[datetime]
+    created_at: datetime
+
+
+class ImageInfo(BaseModel):
     """
     Image metadata returned from the database.
 
@@ -81,7 +110,7 @@ class ImageOut(BaseModel):
     last_modified: datetime
 
 
-class FaceOut(BaseModel):
+class FaceInfo(BaseModel):
     """
     Face metadata returned in image-details & similarity responses.
 
@@ -107,8 +136,8 @@ class ImageDetails(BaseModel):
         faces: List of FaceOut entries.
     """
 
-    image: ImageOut
-    faces: List[FaceOut]
+    image: ImageInfo
+    faces: List[FaceInfo]
 
 
 class UploadResp(BaseModel):
@@ -183,32 +212,35 @@ class SimilarFaceOut(BaseModel):
     distance: float
 
 
-# ─── Application setup & lifespan ────────────────────────────────────────
-
-
+# Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize Azure blob client and database pool on startup; clean up on shutdown."""
-    logger.info("⏳ Starting up – Azure Blob client…")
+
+    logger.info("⏳ Starting up – Azure Blob Storage Client…")
     _resources["blob"] = setup_blob_service_client(
         connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING")
     )
-    logger.success("✅ Azure Blob client ready")
+    logger.success("✅ Azure Blob Storage Client ready")
 
-    logger.info("⏳ Starting up – database pool…")
-    db = Database(
-        host=os.getenv("DBHOST", "localhost"),
-        port=int(os.getenv("DBPORT", 5432)),
-        user=os.getenv("DBUSER", "kanta_admin"),
-        password=os.getenv("DBPASSWORD", "password"),
-        database=os.getenv("DBNAME", "postgres"),
-        ssl=os.getenv("SSLMODE", "require"),
-    )
-    await db.connect()
-    _resources["db"] = db
-    logger.success("✅ Database pool ready")
+    logger.info("⏳ Starting up – Database Connection Pool…")
+    try:
+        db = Database(
+            host=os.getenv("DBHOST", "localhost"),
+            port=int(os.getenv("DBPORT", 5432)),
+            user=os.getenv("DBUSER", "kanta_admin"),
+            password=os.getenv("DBPASSWORD", "password"),
+            database=os.getenv("DBNAME", "postgres"),
+            ssl=os.getenv("SSLMODE", "require"),
+        )
+        await db.connect()
+        _resources["db"] = db
+        logger.success("✅ Database Connection Pool ready")
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to database: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
-    # Ensure the event row exists (idempotent)
+    # Ensure the event row exists
     await db.string_query(
         """
         INSERT INTO events(code, name)
@@ -241,9 +273,7 @@ app.add_middleware(
 )
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────
-
-
+# Resource dependencies
 def get_db() -> Database:
     """Dependency to retrieve our shared Database instance."""
     return _resources["db"]  # type: ignore
@@ -260,13 +290,74 @@ def get_container():
     return container
 
 
-# ─── Endpoints ──────────────────────────────────────────────────────────
+# Endpoints
+
+
+@app.post(
+    "/events/create", response_model=EventInfo, status_code=status.HTTP_201_CREATED
+)
+async def create_event(
+    event_code: str = Query(
+        EVENT_CODE,
+        description="Event code to associate with this image",
+        regex=r"^[a-zA-Z0-9_]+$",
+    ),
+    event_name: str = Query(
+        "Event Name",
+        description="Name of the event",
+        regex=r"^[a-zA-Z0-9_ ]+$",
+    ),
+    start_time: Optional[datetime] = Query(
+        None,
+        description="ISO-8601 timestamp of event start, e.g. 2025-06-01T15:00:00Z",
+    ),
+    db: Database = Depends(get_db),
+):
+    """
+    Create a new event. Error if `code` is already used.
+    """
+    try:
+        eid = await db.insert_event(
+            event_code=event_code,
+            name=event_name,
+            start_time=start_time,
+        )
+        row = await db.get_event_by_code(event_code)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return EventInfo(**row)
+
+
+@app.get("/events/{code}", response_model=EventInfo)
+async def read_event(
+    code: str,
+    db: Database = Depends(get_db),
+):
+    """
+    Retrieve an event by its code.
+    """
+    try:
+        row = await db.get_event_by_code(code)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return EventInfo(**row)
+
+
+@app.delete("/events/{code}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_event(
+    code: str,
+    db: Database = Depends(get_db),
+):
+    """
+    Delete an event by its code.
+    """
+    await db.delete_event_by_code(code)
 
 
 @app.post(
     "/upload-image",
     response_model=UploadResp,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_201_CREATED,  # indicates successful creation (usually used with POST)
     summary="Upload an image, detect faces, store in Azure + DB",
 )
 async def upload_image(
@@ -282,10 +373,12 @@ async def upload_image(
     Detect faces in the uploaded image, store the file in Azure Blob Storage,
     persist metadata to PostgreSQL, and return face locations & embeddings.
     """
+    # 0) Validate the image
     if not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
 
-    # 1) Load into memory → NumPy
+    # 1) Load image into memory → NumPy
+    logger.info("Loading image into memory…")
     t0 = time.perf_counter()
     raw = await image.read()
     try:
@@ -296,9 +389,16 @@ async def upload_image(
     load_time = time.perf_counter() - t0
 
     # 2) Detect faces & embeddings
-    t1 = time.perf_counter()
-    boxes = face_recognition.face_locations(img_np, model="hog")
-    embeddings = face_recognition.face_encodings(img_np, boxes)
+    boxes = []
+    embeddings = []
+    logger.info("Detecting faces and generating embeddings…")
+    try:
+        t1 = time.perf_counter()
+        boxes = face_recognition.face_locations(img_np, model="hog")
+        embeddings = face_recognition.face_encodings(img_np, boxes)
+    except Exception as e:
+        logger.error(f"Face detection failed: {e}")
+        raise HTTPException(400, "Face detection failed")
     detect_time = time.perf_counter() - t1
     logger.info(
         f"Detected {len(embeddings)} faces (load {load_time:.2f}s, detect {detect_time:.2f}s)"
@@ -313,7 +413,7 @@ async def upload_image(
     )  # Sanitize EVENT_CODE to lowercase and remove special characters
     blob_name = f"{event_code_sanitized}/{uid}.{ext}"
     try:
-        logger.info(f"Uploading image {uid} to Azure Blob Storage")
+        logger.info(f"Uploading image with uuid: {uid} to Azure Blob Storage")
         container.upload_blob(
             name=blob_name,
             data=raw,
@@ -325,7 +425,9 @@ async def upload_image(
                 "boxes": json.dumps(boxes),
             },
         )
-        logger.success(f"Uploaded image {uid} to Azure Blob Storage")
+        logger.success(
+            f"Succesfully uploaded image with uuid: {uid} to Azure Blob Storage"
+        )
     except Exception:
         logger.exception("Blob upload failed")
         raise HTTPException(500, "Failed to upload to Azure")
@@ -335,19 +437,19 @@ async def upload_image(
     blob_url = blob_client.url
 
     # 4) Persist image row
-    logger.info(f"Inserting image {uid} into DB")
+    logger.info(f"Inserting image with uuid: {uid} into DB")
     await db.insert_image(
         event_code=event_code,
         image_uuid=uid,
         azure_blob_url=blob_url,
         faces=len(embeddings),
-        created_at=props.creation_time.replace(tzinfo=None),
-        last_modified=props.last_modified.replace(tzinfo=None),
+        created_at=props.creation_time,
+        last_modified=props.last_modified,
     )
-    logger.info(f"Inserted image {uid} into DB")
+    logger.success(f"Succesfully inserted image with uuid: {uid} into DB")
 
     # 5) Persist face rows
-    logger.info(f"Inserting {len(embeddings)} faces into DB")
+    logger.info(f"Inserting {len(embeddings)} faces from image: {uid} into DB")
     for box, emb in zip(boxes, embeddings):
         await db.insert_face(
             event_code=EVENT_CODE,
@@ -361,7 +463,9 @@ async def upload_image(
             embedding=emb.tolist(),
             cluster_id=-2,  # consider the best default value:
         )
-    logger.info(f"Inserted {len(embeddings)} faces into DB")
+    logger.success(
+        f"Sucessfully inserted {len(embeddings)} faces from image: {uid} into DB"
+    )
 
     return UploadResp(
         uuid=uid,
@@ -374,7 +478,7 @@ async def upload_image(
 
 @app.get(
     "/pics",
-    response_model=List[ImageOut],
+    response_model=List[ImageInfo],
     summary="List stored images with optional filters & pagination",
 )
 async def get_pics(
@@ -409,7 +513,7 @@ async def get_pics(
         max_faces=max_faces,
         cluster_list_id=cluster_list_id,
     )
-    return [ImageOut(**r) for r in rows]
+    return [ImageInfo(**r) for r in rows]
 
 
 @app.get(
@@ -425,17 +529,19 @@ async def get_pic(
     Fetch a single image row plus all its face rows by UUID.
     """
     result = await db.get_image_details_by_uuid(uuid)
+
     if not result:
-        raise HTTPException(404, f"Image `{uuid}` not found")
+        raise HTTPException(404, f"Image with uuid: `{uuid}` not found")
+
     return ImageDetails(
-        image=ImageOut(**result["image"]),
-        faces=[FaceOut(**f) for f in result["faces"]],
+        image=ImageInfo(**result["image"]),
+        faces=[FaceInfo(**f) for f in result["faces"]],
     )
 
 
 @app.delete(
     "/pics/{uuid}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_204_NO_CONTENT,  # 204 No Content, usually used for PUT / DELETE, when no further content is returned
     summary="Delete an image and its faces (DB + blob)",
 )
 async def delete_pic(
@@ -522,30 +628,39 @@ async def find_similar(
     Detect exactly one face in the upload, compute its embedding, then
     return the top-K nearest neighbors from the database.
     """
+    # 0) Validate the image
     if not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
 
+    # 1) Load image into memory → NumPy
+    logger.info("Loading image into memory…")
     raw = await image.read()
     try:
         pil = Image.open(BytesIO(raw)).convert("RGB")
     except Exception:
         raise HTTPException(400, "Invalid image data")
-
     img_np = np.array(pil)
+
+    # 2) Detect faces & embeddings
+    logger.info("Detecting faces and generating embeddings…")
     boxes = face_recognition.face_locations(img_np, model="hog")
     if len(boxes) != 1:
-        msg = "No face detected" if not boxes else "Multiple faces detected"
+        msg = (
+            "No face detected, please upload an image with exactly one face"
+            if not boxes
+            else "Multiple faces detected, please upload an image with exactly one face"
+        )
         raise HTTPException(400, msg)
 
     emb = face_recognition.face_encodings(img_np, boxes)[0].tolist()
-    logger.info("Searching top-%d by %s distance…", top_k, metric)
+    logger.info(f"Searching top-{top_k} by {metric} metric distance…")
     hits = await db.similarity_search(
         event_code=event_code,
         target_embedding=emb,
         metric=metric,
         top_k=top_k,
     )
-    logger.success("Found %d similar faces", len(hits))
+    logger.success(f"Found {len(hits)} similar faces")
     return [SimilarFaceOut(**r) for r in hits]
 
 
