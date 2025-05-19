@@ -1,19 +1,10 @@
-# Use runtime image if you don't need to compile CUDA code
-FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 
-# Clean apt cache in the same layer it's created
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-    
-# Download the latest installer
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
+WORKDIR /app
 
-# Run the installer then remove it
-RUN sh /uv-installer.sh && rm /uv-installer.sh
-
-# Ensure the installed binary is on the `PATH`
-ENV PATH="/root/.local/bin/:$PATH"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -38,4 +29,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     # Ensure the installed binary is on the `PATH`
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["fastapi", "dev", "--host", "0.0.0.0", "main.py"]
+CMD ["fastapi", "dev", "--host", "0.0.0.0", "src/app/main.py"]
