@@ -193,6 +193,13 @@ Kanta follows the "Module/Functionality" (Package) layout:
 └── tests/                      # Pytest tests, mirroring app structure
 ```
 
+| Layer        | FastAPI Component                                     | Role                                        |
+| ------------ | ----------------------------------------------------- | ------------------------------------------- |
+| Presentation | `router.py` in each domain (events, images, clusters) | HTTP I/O, request validation, DI            |
+| Service      | `service.py` in each domain                           | Business rules, orchestration               |
+| Data/Infra   | `models.py`, `db/`, `core/azure_blob.py`              | Persistence (DB, migrations), external SDKs |
+
+
 ---
 
 ## 4. Prerequisites
