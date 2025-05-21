@@ -348,6 +348,7 @@ This file tells Alembic how to connect to your database and where to find your S
     # ... other imports ...
     from src.app.db.base import Base  # Import your Base
     # Import all your models so they are registered with Base.metadata
+
     # This is crucial for autogenerate to detect them.
     from src.app.events import models as event_models
     from src.app.images import models as image_models
@@ -422,7 +423,46 @@ Whenever you change your SQLAlchemy models (e.g., add a new model, add a column 
     alembic upgrade head
     ```
 
+5. **Verify the update**
+
+   ```bash
+   alembic current           # confirm the DB now reports the new head
+   ```
+
+6. **If you need to roll back**
+
+   ```bash
+   alembic downgrade -1      # step back one revision
+   # — or —
+   alembic downgrade <rev>   # go back to a specific revision
+   ```
+
+7. **Re-check after revert**
+
+   ```bash
+   alembic current           # ensure the DB reports the older revision
+   ```
+
 Using Alembic is highly recommended for any project that will evolve, as it provides a controlled and versioned way to manage your database schema.
+
+With these commands and checkpoints in place, you can treat your schema changes almost like version control—inspect, advance, and roll back in a controlled, repeatable way.
+
+
+#### Alembic Commands Summary:
+| Command                                  | Description                                                    | Example                                      |
+| ---------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- |
+| `alembic history`                        | Show the full revision history (oldest → newest)               | `alembic history`                            |
+| `alembic history --verbose`              | History with paths and up/down details                         | `alembic history --verbose`                  |
+| `alembic current`                        | Show the revision(s) your DB is currently at                   | `alembic current`                            |
+| `alembic heads`                          | List the “head” revision(s) in your migrations folder          | `alembic heads`                              |
+| `alembic show <rev>`                     | Display the contents of a single migration script              | `alembic show ae1027a6acf`                   |
+| `alembic upgrade head`                   | Apply all unapplied migrations up to the latest revision       | `alembic upgrade head`                       |
+| `alembic upgrade <rev>`                  | Upgrade your DB to exactly `<rev>`                             | `alembic upgrade 4a1b53bc786c`               |
+| `alembic downgrade -1`                   | Revert (downgrade) by one revision                             | `alembic downgrade -1`                       |
+| `alembic downgrade <rev>`                | Downgrade your DB to exactly `<rev>`                           | `alembic downgrade ae1027a6acf`              |
+| `alembic stamp <rev>`                    | Mark DB as at `<rev>` without running SQL (no schema changes)  | `alembic stamp head`                         |
+| `alembic merge -m "msg" <h1> <h2> [...]` | Create a merge migration when you have multiple heads/branches | `alembic merge -m "merge heads" head1 head2` |
+
 
 ### 4. Azure Blob Storage Setup
 
@@ -484,19 +524,19 @@ Key endpoints include:
 
 | Path                   | Method | Description                                       |
 | ---------------------- | ------ | ------------------------------------------------- |
-| `/api/v1/events`       | GET    | List (or filter) events by code & running status  |
-| `/api/v1/events`       | POST   | Create a new event                                |
-| `/api/v1/events/{event_id}` | GET    | Get a specific event by ID                      |
-| `/api/v1/events/{event_id}` | PUT    | Update an existing event                          |
-| `/api/v1/events/{event_id}` | DELETE | Delete an event                                   |
+| `/events`       | GET    | List (or filter) events by code & running status  |
+| `/events`       | POST   | Create a new event                                |
+| `/events/{event_id}` | GET    | Get a specific event by ID                      |
+| `/events/{event_id}` | PUT    | Update an existing event                          |
+| `/events/{event_id}` | DELETE | Delete an event                                   |
 | ---------------------- | ------ | ------------------------------------------------- |
-| `/api/v1/pics`         | POST   | Upload image, detect faces, store in Azure & DB   |
-| `/api/v1/pics`         | GET    | List images with filters & pagination             |
-| `/api/v1/pics/{image_uuid}`| GET    | Fetch image metadata + faces for a specific image |
-| `/api/v1/pics/{image_uuid}`| DELETE | Delete an image & its associated faces            |
+| `/pics`         | POST   | Upload image, detect faces, store in Azure & DB   |
+| `/pics`         | GET    | List images with filters & pagination             |
+| `/pics/{image_uuid}`| GET    | Fetch image metadata + faces for a specific image |
+| `/pics/{image_uuid}`| DELETE | Delete an image & its associated faces            |
 | ---------------------- | ------ | ------------------------------------------------- |
-| `/api/v1/clusters`     | GET    | Get cluster summary or redirect to filtered `/pics` |
-| `/api/v1/find-similar` | POST   | Upload a face image & find top-K similar faces from DB |
+| `/clusters`     | GET    | Get cluster summary or redirect to filtered `/pics` |
+| `/find-similar` | POST   | Upload a face image & find top-K similar faces from DB |
 
 *Please refer to the autogenerated Swagger documentation for full request/response schemas, parameters, and authentication details.*
 
