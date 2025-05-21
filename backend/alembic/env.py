@@ -17,7 +17,9 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-from src.app.db import Base
+from src.app.events.models import Event
+from src.app.images.models import Image, Face
+from src.app.db.base import Base
 
 # set the target metadata for `autogenerate`
 target_metadata = Base.metadata
