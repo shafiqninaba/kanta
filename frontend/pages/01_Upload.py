@@ -14,29 +14,45 @@ if not st.session_state.event_code:
     st.warning("Please select an event from the sidebar to continue.")
     st.stop()
 
-# Image upload widget
-uploaded_file = st.file_uploader("Choose an image", type=['jpg', 'jpeg', 'png'])
+# Multiple image upload widget
+uploaded_files = st.file_uploader("Choose images", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True)
 
-if uploaded_file is not None:
-    # Preview the image
-    img = Image.open(uploaded_file)
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.image(img, caption="Preview", use_container_width=True)
+if uploaded_files:
+    # Create columns for image previews
+    cols = st.columns(3)
     
-    with col2:
-        st.info("Ready to upload")
-        
-    # Reset file pointer for upload
-    uploaded_file.seek(0)
+    # Display preview for each image
+    for idx, uploaded_file in enumerate(uploaded_files):
+        with cols[idx % 3]:
+            img = Image.open(uploaded_file)
+            st.image(img, caption=f"Preview {idx+1}", use_container_width=True)
+            uploaded_file.seek(0)  # Reset file pointer
+    
+    st.info(f"Ready to upload {len(uploaded_files)} images")
     
     # Upload button
-    if st.button("Upload Image"):
-        with st.spinner("Uploading..."):
-            result, success = upload_image(st.session_state.event_code, uploaded_file)
+    if st.button("Upload Images"):
+        with st.spinner("Uploading images..."):
+            success_count = 0
+            failed_uploads = []
             
-            if success:
-                st.success("Image uploaded successfully!")
-                st.json(result)
+            progress_bar = st.progress(0)
+            for idx, uploaded_file in enumerate(uploaded_files):
+                result, success = upload_image(st.session_state.event_code, uploaded_file)
+                
+                if success:
+                    success_count += 1
+                else:
+                    failed_uploads.append(f"Image {idx+1}: {result}")
+                
+                # Update progress bar
+                progress_bar.progress((idx + 1) / len(uploaded_files))
+            
+            if success_count == len(uploaded_files):
+                st.success(f"All {success_count} images uploaded successfully!")
             else:
-                st.error(result)
+                st.warning(f"Uploaded {success_count} out of {len(uploaded_files)} images")
+                if failed_uploads:
+                    st.error("Failed uploads:")
+                    for error in failed_uploads:
+                        st.error(error)

@@ -37,7 +37,6 @@ if success:
                 
                 for i, sample in enumerate(cluster['samples']):
                     with cols[i % len(cols)]:
-                        print(sample.keys())
                         st.image(sample['sample_blob_url'], use_container_width=True)
                         st.caption(f"Face ID: {sample['face_id']}")
             

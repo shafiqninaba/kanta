@@ -75,7 +75,6 @@ if success:
     
     for i, image in enumerate(images):
         with cols[i % 3]:
-            print(image.keys())
             st.image(
                 image["azure_blob_url"], 
                 caption=f"uuid: {image['uuid']}",
