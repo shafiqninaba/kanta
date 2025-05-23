@@ -75,10 +75,11 @@ if success:
     
     for i, image in enumerate(images):
         with cols[i % 3]:
+            print(image.keys())
             st.image(
-                image["url"], 
-                caption=f"Faces: {image['face_count']}",
-                use_column_width=True
+                image["azure_blob_url"], 
+                caption=f"uuid: {image['uuid']}",
+                use_container_width=True  # Updated parameter
             )
             
             # Image details button
@@ -95,22 +96,23 @@ if success:
                 col1, col2 = st.columns([1, 2])
                 
                 with col1:
-                    st.image(image_details["url"])
+                    st.image(image_details["image"]["azure_blob_url"])
                 
                 with col2:
-                    st.write(f"**UUID:** {image_details['uuid']}")
-                    st.write(f"**Upload Time:** {image_details['created_at']}")
-                    st.write(f"**Face Count:** {image_details['face_count']}")
+                    st.write(f"**UUID:** {image_details["image"]['uuid']}")
+                    st.write(f"**Upload Time:** {image_details["image"]['created_at']}")
                     
                     # Face details
                     if image_details["faces"]:
                         st.subheader(f"{len(image_details['faces'])} Faces Detected")
+                        # Create columns for face details instead of nested expanders
+                        face_cols = st.columns(3)
                         for i, face in enumerate(image_details["faces"]):
-                            with st.expander(f"Face #{i+1}"):
-                                st.write(f"Face ID: {face['id']}")
+                            with face_cols[i % 3]:
+                                st.markdown(f"**Face #{i+1}**")
+                                st.write(f"Face ID: {face['face_id']}")
                                 st.write(f"Cluster ID: {face['cluster_id']}")
-                                # You could add more face details here
-                
+                                # You could add more face details here                
                 # Add a button to close the details
                 if st.button("Close Details"):
                     del st.session_state.selected_image

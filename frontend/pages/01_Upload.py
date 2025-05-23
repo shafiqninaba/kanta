@@ -22,7 +22,7 @@ if uploaded_file is not None:
     img = Image.open(uploaded_file)
     col1, col2 = st.columns([1, 2])
     with col1:
-        st.image(img, caption="Preview", use_column_width=True)
+        st.image(img, caption="Preview", use_container_width=True)
     
     with col2:
         st.info("Ready to upload")
