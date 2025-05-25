@@ -2,6 +2,7 @@
 # Configuration for clustering face embeddings using Hydra.
 
 algo: hdbscan #[hdbscan, dbscan, optics, affinity_propagation, chinese_whispers, agglomerative, birch]
+processing_method: umap # [none, normalize, pca, umap]
 
 # --------------------------------------------------------------------
 # High‐Performance Algorithms
@@ -42,6 +43,7 @@ dbscan:
 
 # --------------------------------------------------------------------
 # Lower‐Performance Algorithms
+# Works well with UMAP dimensionality reduction though!!!
 # --------------------------------------------------------------------
 agglomerative:
   n_clusters: null # Number of clusters (null to use distance_threshold)
@@ -54,3 +56,20 @@ birch:
   threshold: 0.5 # Radius for subcluster creation
   branching_factor: 50 # Max subclusters per node
   
+
+# --------------------------------------------------------------------
+# Preprocessing parameters
+# PCA (used if processing_method == 'pca')
+pca:
+  n_components: 30
+  whiten: false 
+  random_state: 42
+
+# UMAP (used if processing_method == 'umap')
+# https://umap-learn.readthedocs.io/en/latest/parameters.html
+umap:
+  n_components: 30         
+  n_neighbors: 15
+  min_dist: 0.1
+  metric: euclidean
+  random_state: 42

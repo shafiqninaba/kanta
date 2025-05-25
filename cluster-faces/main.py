@@ -1,5 +1,5 @@
 # src/main.py
-"""Entry point for clustering face embeddings using Hydra."""
+"""Entry point for clustering face embeddings using Hydra with preprocessing."""
 
 import ast
 import asyncio
@@ -12,6 +12,7 @@ import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
+from sklearn.preprocessing import normalize
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -26,6 +27,7 @@ from src.clustering import (
     hdbscan_cluster,
     optics_cluster,
 )
+from src.processing import process_pca, process_umap
 
 # Load environment variables
 load_dotenv()
@@ -90,12 +92,12 @@ async def update_clusters(
 
 async def run(cfg: DictConfig) -> None:
     """
-    Main logic: retrieve events, run clustering, and update DB.
+    Main logic: retrieve events, preprocess embeddings, run clustering, and update DB.
 
     Args:
         cfg: Hydra configuration.
     """
-    logger.info("Starting clustering..")
+    logger.info("Starting clustering...")
 
     async with AsyncSessionLocal() as session:
         event_ids = await get_running_events(session)
@@ -106,12 +108,15 @@ async def run(cfg: DictConfig) -> None:
             face_ids = [r[0] for r in rows]
             count = len(face_ids)
 
-            # Skip events with fewer than 2 faces
             if count < 2:
                 logger.warning(f"Skipping event {event_id}: only {count} face(s)")
                 continue
+            else:
+                logger.info(
+                    f"Performing '{cfg.algo}' clustering on event {event_id} with {count} faces"
+                )
 
-            # Parse embeddings into numpy array
+            # Raw embeddings
             embeddings = np.array(
                 [
                     ast.literal_eval(r[1]) if isinstance(r[1], str) else r[1]
@@ -120,9 +125,31 @@ async def run(cfg: DictConfig) -> None:
                 dtype=np.float32,
             )
 
-            logger.info(
-                f"Performing '{cfg.algo}' clustering on event {event_id} with {count} faces"
-            )
+            # Preprocessing
+            if cfg.algo != "chinese_whispers":
+                logger.info(
+                    f"Preprocessing embeddings with method: '{cfg.processing_method}'"
+                )
+                if cfg.processing_method == "normalize":
+                    embeddings = normalize(embeddings, axis=1)
+
+                elif cfg.processing_method == "pca":
+                    embeddings = process_pca(
+                        embeddings,
+                        n_components=cfg.pca.n_components,
+                        whiten=cfg.pca.whiten,
+                        random_state=cfg.pca.random_state,
+                    )
+
+                elif cfg.processing_method == "umap":
+                    embeddings = process_umap(
+                        embeddings,
+                        n_components=cfg.umap.n_components,
+                        n_neighbors=cfg.umap.n_neighbors,
+                        min_dist=cfg.umap.min_dist,
+                        metric=cfg.umap.metric,
+                        random_state=cfg.umap.random_state,
+                    )
 
             try:
                 if cfg.algo == "dbscan":

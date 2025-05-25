@@ -1,7 +1,7 @@
 # src/clustering.py
-"""Clustering algorithms for face embeddings with Google‐style docstrings."""
+"""Clustering algorithms and preprocessing for face embeddings."""
 
-from typing import Optional
+from typing import Any, Optional
 
 import chinese_whispers
 import hdbscan
@@ -15,7 +15,6 @@ from sklearn.cluster import (
     AgglomerativeClustering,
     Birch,
 )
-from sklearn.preprocessing import normalize
 
 
 def dbscan_cluster(
@@ -41,9 +40,8 @@ def dbscan_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = DBSCAN(eps=eps, min_samples=min_samples, metric=metric, n_jobs=n_jobs)
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"DBSCAN clustering failed: {e}")
 
@@ -73,7 +71,6 @@ def hdbscan_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = hdbscan.HDBSCAN(
             min_cluster_size=min_cluster_size,
             cluster_selection_method=cluster_selection_method,
@@ -81,7 +78,7 @@ def hdbscan_cluster(
             alpha=alpha,
             metric=metric,
         )
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"HDBSCAN clustering failed: {e}")
 
@@ -109,14 +106,13 @@ def optics_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = OPTICS(
             min_samples=min_samples,
             xi=xi,
             min_cluster_size=min_cluster_size,
             metric=metric,
         )
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"OPTICS clustering failed: {e}")
 
@@ -142,11 +138,10 @@ def affinity_propagation_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = AffinityPropagation(
             damping=damping, max_iter=max_iter, convergence_iter=convergence_iter
         )
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"Affinity Propagation clustering failed: {e}")
 
@@ -212,14 +207,13 @@ def agglomerative_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = AgglomerativeClustering(
             n_clusters=n_clusters,
             distance_threshold=distance_threshold,
             linkage=linkage,
             metric=metric,
         )
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"Agglomerative clustering failed: {e}")
 
@@ -245,12 +239,11 @@ def birch_cluster(
         RuntimeError: If clustering fails.
     """
     try:
-        data = normalize(embeddings)
         model = Birch(
             threshold=threshold,
             branching_factor=branching_factor,
             n_clusters=n_clusters,
         )
-        return model.fit_predict(data)
+        return model.fit_predict(embeddings)
     except Exception as e:
         raise RuntimeError(f"Birch clustering failed: {e}")
