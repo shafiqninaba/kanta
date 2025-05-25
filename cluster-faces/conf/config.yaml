@@ -2,7 +2,7 @@
 # Configuration for clustering face embeddings using Hydra.
 
 algo: hdbscan #[hdbscan, dbscan, optics, affinity_propagation, chinese_whispers, agglomerative, birch]
-processing_method: umap # [none, normalize, pca, umap]
+processing_method: normalize # [none, normalize, pca, umap]
 
 # --------------------------------------------------------------------
 # High‐Performance Algorithms
@@ -16,7 +16,7 @@ hdbscan:
 
 # Read more about parameters at https://hdbscan.readthedocs.io/en/latest/parameter_selection.html
 
-affinity_propagation:
+affinity_propagation: #does not work well with umap
   damping: 0.5 # Damping factor for convergence (0.5–1.0)
   max_iter: 200 # Max iterations for convergence (200 = default)
   convergence_iter: 15 # Iterations for convergence check (15 = default)
