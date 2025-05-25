@@ -108,12 +108,12 @@ async def run(cfg: DictConfig) -> None:
             face_ids = [r[0] for r in rows]
             count = len(face_ids)
 
-            if count < 2:
+            if count < 2:  # at least 2 faces are required for clustering
                 logger.warning(f"Skipping event {event_id}: only {count} face(s)")
                 continue
             else:
                 logger.info(
-                    f"Performing '{cfg.algo}' clustering on event {event_id} with {count} faces"
+                    f"Event {event_id} has {count} face(s), proceeding with clustering"
                 )
 
             # Raw embeddings
@@ -150,8 +150,12 @@ async def run(cfg: DictConfig) -> None:
                         metric=cfg.umap.metric,
                         random_state=cfg.umap.random_state,
                     )
+                logger.info("Sucessfully preprocessed embeddings!")
 
             try:
+                logger.info(
+                    f"Performing '{cfg.algo}' clustering on event {event_id}..."
+                )
                 if cfg.algo == "dbscan":
                     labels = dbscan_cluster(
                         embeddings,
@@ -212,10 +216,16 @@ async def run(cfg: DictConfig) -> None:
                     f"Clustering failed for event {event_id} using '{cfg.algo}': {exc}"
                 )
                 continue
-
-            await update_clusters(session, face_ids, labels)
             n_clusters = len(set(labels.tolist()) - {-1})
-            logger.info(f"Event {event_id}: found {n_clusters} cluster(s)")
+            logger.info(
+                f"Clustering completed for event {event_id}, found {len(set(labels))} clusters"
+            )
+
+            logger.info(f"Updating clusters in database for event {event_id}...")
+            await update_clusters(session, face_ids, labels)
+            logger.info(
+                f"Updated {len(face_ids)} faces with {n_clusters} clusters for event {event_id}"
+            )
 
     logger.info("Clustering run complete.")
 
