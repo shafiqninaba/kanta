@@ -1,12 +1,13 @@
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
 import requests
 import streamlit as st
-import os
-from typing import Dict, Any, Tuple, List, Optional
 
-# API Configuration
+# API Configuration, adjust if your backend API is on a different URL
 API_BASE_URL = os.getenv(
     "BACKEND_SERVER_URL", "http://backend:8000"
-)  # Adjust if your backend API is on a different URL
+)
 
 
 def get_events():
