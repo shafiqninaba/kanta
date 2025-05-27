@@ -1,10 +1,11 @@
 # utils/image_helpers.py
 
-import streamlit as st  # For st.sidebar.error in fetch_image_bytes_from_url
-import requests
-from io import BytesIO
-from PIL import Image, UnidentifiedImageError
 import base64
+from io import BytesIO
+
+import requests
+import streamlit as st  # For st.sidebar.error in fetch_image_bytes_from_url
+from PIL import Image, UnidentifiedImageError
 
 
 @st.cache_data(ttl=3600)  # Keep caching here as it's data fetching

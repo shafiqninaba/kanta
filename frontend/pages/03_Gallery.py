@@ -1,15 +1,12 @@
-import streamlit as st
-from PIL import Image, ImageOps, UnidentifiedImageError  # ImageOps not used, can remove
-import requests
-from io import BytesIO
-from datetime import datetime
-import base64
 import zipfile
-from typing import List, Optional  # For type hinting
+from datetime import datetime
+from io import BytesIO
+
+import streamlit as st
 
 # Assuming your utils file is in utils/image_helpers.py
-from utils.api import get_images, get_image_detail
-from utils.image_helpers import fetch_image_bytes_from_url, crop_and_encode_face
+from utils.api import get_image_detail, get_images
+from utils.image_helpers import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
 # --- Page Configuration ---
@@ -323,12 +320,12 @@ def image_detail_popover_content_fn(image_uuid_for_popover: str):
                         )
                     else:
                         st.markdown(
-                            f"<div class='popover-face-image-wrapper'><div class='face-img-popover-placeholder'>Face</div></div>",
+                            "<div class='popover-face-image-wrapper'><div class='face-img-popover-placeholder'>Face</div></div>",
                             unsafe_allow_html=True,
                         )
                 else:
                     st.markdown(
-                        f"<div class='popover-face-image-wrapper'><div class='face-img-popover-placeholder'>Face</div></div>",
+                        "<div class='popover-face-image-wrapper'><div class='face-img-popover-placeholder'>Face</div></div>",
                         unsafe_allow_html=True,
                     )
 

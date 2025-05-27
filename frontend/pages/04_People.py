@@ -1,16 +1,15 @@
 # pages/04_People.py (or your chosen filename)
 
-import streamlit as st
-from PIL import Image, UnidentifiedImageError
-import requests  # Keep for direct image fetching if utils.image_helpers doesn't use st.cache_data for some reason
-from io import BytesIO
 import base64
 import json
+from io import BytesIO
 
-from utils.image_helpers import fetch_image_bytes_from_url, crop_and_encode_face
+import streamlit as st
+from PIL import Image, UnidentifiedImageError
 
 # Ensure get_clusters and the new find_similar_faces_api are imported
-from utils.api import get_clusters, find_similar_faces_api
+from utils.api import find_similar_faces_api, get_clusters
+from utils.image_helpers import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
 # --- Page Configuration ---
@@ -19,9 +18,6 @@ st.set_page_config(page_title="People & Similarity", page_icon="🧑‍🤝‍�
 # --- Initialize Session State & Event Selection ---
 init_session_state()
 # Pass the correct function to fetch events for the sidebar
-from utils.api import (
-    get_events,
-)  # Assuming get_events in utils.api returns (data, success)
 
 get_event_selection()
 CLUSTER_ID_UNASSIGNED = -1
@@ -414,7 +410,7 @@ with tab_similarity:
                 with grid_cols_similar[i % PERSON_CARD_COLS]:
                     # Each similar face card
                     st.markdown(
-                        f"<div class='similar-face-card'>", unsafe_allow_html=True
+                        "<div class='similar-face-card'>", unsafe_allow_html=True
                     )
                     if face_data["is_placeholder"]:
                         st.markdown(face_data["face_html"], unsafe_allow_html=True)

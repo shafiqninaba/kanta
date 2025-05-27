@@ -1,11 +1,12 @@
 import time
-import streamlit as st
 from io import BytesIO
+
+import streamlit as st
 from PIL import Image, ImageEnhance, ImageOps
-from utils.session import init_session_state, get_event_selection
 from utils.api import (
     upload_image,
 )  # Expects upload_image(event_code, file_buffer) -> (result_message, success_boolean)
+from utils.session import get_event_selection, init_session_state
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Event Film Cam", page_icon="📸", layout="wide")

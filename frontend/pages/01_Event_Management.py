@@ -1,14 +1,15 @@
 # pages/05_Manage_Events.py
 
+from datetime import date, datetime, time  # For date/time manipulation
+from typing import Optional
+
 import streamlit as st
-from datetime import datetime, date, time  # For date/time manipulation
-from utils.session import get_event_selection, init_session_state
 from utils.api import (
-    get_events,
     create_event_api,
+    get_events,
     update_event_api,
 )  # Import new functions
-from typing import Optional, Dict, Any, Tuple
+from utils.session import get_event_selection, init_session_state
 
 # --- Page Config ---
 st.set_page_config(page_title="Event Management", page_icon="⚙️", layout="wide")
