@@ -1,268 +1,435 @@
 import streamlit as st
-from PIL import Image
-from utils.session import init_session_state, get_event_selection
-from utils.api import upload_image
+from PIL import Image, ImageEnhance, ImageOps
+from utils.session import (
+    init_session_state,
+    get_event_selection,
+)  # Assuming these are your utility functions
+from utils.api import upload_image  # Assuming this is your API call utility
+from io import BytesIO
+import time
 
-# ─────────────────────────────────────────────
-# CONFIG & STATE
-# ─────────────────────────────────────────────
 st.set_page_config(page_title="Event Film Cam", page_icon="📸", layout="wide")
 
-init_session_state()
-get_event_selection()
+# ─────────────────────────────────────────────
+# INIT STATE
+# ─────────────────────────────────────────────
+init_session_state()  # Initializes ss.event_code, etc.
+get_event_selection()  # Potentially updates ss.event_code from a sidebar
 
 MAX_PHOTOS = 20
-ROWS, COLS = 4, 5
+ROWS, COLS = 4, 5  # Film strip grid dimensions
 
 ss = st.session_state
-ss.setdefault("captured_images", [])
-ss.setdefault("uploaded_images", [])
-ss.setdefault("selected_shots", set())
+ss.setdefault("captured_images", [])  # List of BytesIO from camera, pending upload
+ss.setdefault(
+    "uploaded_images", []
+)  # List of BytesIO (from camera) or UploadedFile (from disk) that are "on the film roll" and uploaded
+ss.setdefault("current_filter", "Normal")
+ss.setdefault("last_processed_img", None)  # To prevent re-processing same camera shot
+
+# Calculate shots_left based on both pending and already uploaded images on the film roll
+shots_left = MAX_PHOTOS - (len(ss.captured_images) + len(ss.uploaded_images))
 
 # ─────────────────────────────────────────────
-# INTRO NOTE
+# HEADER
 # ─────────────────────────────────────────────
 st.markdown("""
-You can **upload existing images** to the event, or use the **film camera** below to take new photos.  
-But remember — you only get **limited disposable shots**, so make them count!
+### 📷 How it works
+Upload existing images *or* use the **film camera**. You've got a limited roll – **make every shot count!**
 """)
 
 # ─────────────────────────────────────────────
-# UPLOAD EXISTING PHOTOS EXPANDER
+# EVENT CODE CHECK
 # ─────────────────────────────────────────────
-with st.expander("Upload existing photos from disk", expanded=False):
+if not ss.get("event_code"):
+    st.error("⚠️ Please select an event code first before taking or uploading photos!")
+    st.stop()
+
+# ─────────────────────────────────────────────
+# FILE UPLOADER (Expander) - Counts towards MAX_PHOTOS
+# ─────────────────────────────────────────────
+with st.expander(
+    "Upload existing photos from disk (uses disposable shots)", expanded=False
+):
     sel_files = st.file_uploader(
-        "Choose images", type=["jpg", "jpeg", "png"], accept_multiple_files=True
+        "Choose images",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key="disk_file_uploader",
     )
     if sel_files:
-        cols = st.columns(3)
+        preview_cols = st.columns(
+            min(len(sel_files), 4)
+        )  # Show up to 4 previews side-by-side
         for i, uf in enumerate(sel_files):
-            with cols[i % 3]:
+            with preview_cols[i % len(preview_cols)]:
                 st.image(uf, caption=f"Preview {i+1}", use_container_width=True)
-        if st.button("Upload selected images", key="btn_bulk_upload"):
-            ok, fails = 0, []
-            prog = st.progress(0.0)
-            for i, uf in enumerate(sel_files):
-                r, suc = upload_image(ss.event_code, uf)
-                if suc:
-                    ok += 1
-                else:
-                    fails.append(f"Image {i+1}: {r}")
-                prog.progress((i + 1) / len(sel_files))
-            if ok:
-                st.success(f"Uploaded {ok} image(s)")
-            for msg in fails:
-                st.error(msg)
 
-st.markdown("---")
+        if st.button("Upload selected images from disk", key="btn_bulk_upload"):
+            if not ss.event_code:
+                st.error("Please select an event code first!")
+            else:
+                with st.spinner("Uploading images from disk..."):
+                    ok_disk, fails_disk = 0, []
+
+                    for i, uf in enumerate(sel_files):
+                        current_film_roll_count = len(ss.captured_images) + len(
+                            ss.uploaded_images
+                        )
+                        if current_film_roll_count >= MAX_PHOTOS:
+                            st.warning(
+                                f"⚠️ Film roll full ({current_film_roll_count}/{MAX_PHOTOS}). Cannot upload '{uf.name}' or subsequent images."
+                            )
+                            break
+
+                        uf.seek(0)
+                        res, suc = upload_image(ss.event_code, uf)
+
+                        if suc:
+                            ok_disk += 1
+                            uf.seek(0)
+                            ss.uploaded_images.append(uf)
+                        else:
+                            fails_disk.append(f"Image '{uf.name}': {res}")
+                        time.sleep(0.1)
+
+                if ok_disk > 0:
+                    # CORRECTED LINE:
+                    st.toast(
+                        f"✅ Successfully uploaded {ok_disk} image(s) from disk to the film roll!",
+                        icon="📤",
+                    )
+                for msg in fails_disk:
+                    st.error(f"❌ {msg}")
+
+                if ok_disk > 0 or fails_disk:
+                    st.rerun()
+
+st.divider()
 
 # ─────────────────────────────────────────────
-# MAIN LAYOUT: CAMERA | FILM STRIP | BUTTONS
+# SHOTS COUNTER
 # ─────────────────────────────────────────────
-cam_col, strip_col, btn_col = st.columns([2, 3, 1], gap="medium")
+counter_color = (
+    "#ef476f" if shots_left <= 5 else ("#fca311" if shots_left <= 10 else "#eee")
+)  # Orange for medium, Red for low
+st.markdown(
+    f"""
+<div style='font-family:monospace;font-size:18px;padding:8px;background:#222;color:{counter_color};border-radius:8px;text-align:center;margin-bottom:16px;'>
+{shots_left} SHOT{"S" if shots_left != 1 else ""} REMAINING
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+# ─────────────────────────────────────────────
+# LAYOUT - 2 COLUMNS (Camera: 2 parts, Film Strip: 3 parts width)
+# ─────────────────────────────────────────────
+cam_col, strip_col = st.columns([2, 3], gap="medium")
 
 # --------------------------------------------
-# CAMERA SECTION
+# CAMERA COLUMN
 # --------------------------------------------
 with cam_col:
     st.subheader("📸 Film Camera")
 
-    shots_used = len(ss.captured_images) + len(ss.uploaded_images)
-    shots_left = MAX_PHOTOS - shots_used
+    # Camera input - active if shots_left > 0
+    if shots_left > 0:
+        img_file = st.camera_input(
+            "Tap shutter (horizontal preferred)", key=f"camera_input_{shots_left}"
+        )
+    else:
+        st.warning("🎞️ Film roll exhausted! Upload or delete some shots to continue.")
+        img_file = None  # Ensure img_file is None if camera is not shown
 
-    # Prominent shot counter
-    st.markdown(
-        f"""
-    <div style='text-align: center; padding: 15px; background: #f0f2f6; border-radius: 10px; margin-bottom: 20px;'>
-        <h3 style='margin: 0; color: #1f77b4; font-style: italic;'>
-            {shots_left} shots remaining
-        </h3>
-    </div>
-    """,
-        unsafe_allow_html=True,
+    # Filter selection
+    ss.current_filter = st.selectbox(
+        "Filter",
+        ["Normal", "B&W", "Warm", "Cool", "Sepia"],
+        index=["Normal", "B&W", "Warm", "Cool", "Sepia"].index(ss.current_filter),
+        key="filter_selectbox",
     )
 
-    if shots_left > 0:
-        cam_key = f"cam_{shots_used}"
-        img_data = st.camera_input("Tap to capture (landscape preferred)", key=cam_key)
-        if img_data:
-            ss.captured_images.append(img_data)
-            # Clear selections when new photo is taken
-            ss.selected_shots = set()
+    # Process captured image
+    if img_file and img_file != ss.last_processed_img:
+        # This check is now redundant due to camera_input being conditional, but harmless
+        if len(ss.captured_images) + len(ss.uploaded_images) >= MAX_PHOTOS:
+            st.error(
+                "🎞️ Film roll exhausted! (This message should ideally not appear if camera is disabled)"
+            )
+        else:
+            with st.spinner("Processing image..."):
+                pil = Image.open(img_file).convert("RGB")
+                f = ss.current_filter
+
+                if f == "B&W":
+                    pil = pil.convert("L").convert("RGB")
+                elif f == "Warm":
+                    pil = Image.blend(
+                        ImageEnhance.Color(pil).enhance(1.3),
+                        Image.new("RGB", pil.size, (255, 230, 200)),
+                        0.15,
+                    )
+                elif f == "Cool":
+                    pil = Image.blend(
+                        ImageEnhance.Color(pil).enhance(0.9),
+                        Image.new("RGB", pil.size, (200, 230, 255)),
+                        0.15,
+                    )
+                elif f == "Sepia":
+                    pil = ImageOps.colorize(pil.convert("L"), "#704214", "#C0A080")
+
+                buf = BytesIO()
+                pil.save(buf, "JPEG", quality=85)
+                buf.seek(0)
+                # Giving a more unique name for potential debugging, though not strictly necessary for BytesIO
+                buf.name = f"capture_{int(time.time())}_{len(ss.captured_images)+1}.jpg"
+
+                ss.captured_images.append(buf)
+                ss.last_processed_img = img_file
+
+                time.sleep(0.5)
+
+            st.toast(f"📸 Shot captured with {f} filter!", icon="✨")
             st.rerun()
-    else:
-        st.warning("🎞️ Film roll finished! Upload or delete shots to continue.")
 
 # --------------------------------------------
-# FILM STRIP SECTION (Sequential Order)
+# FILM STRIP + ACTIONS
 # --------------------------------------------
 with strip_col:
     st.subheader("🎞️ Film Strip")
+    st.markdown("Here are your shots. Pending uploads are marked with a checkbox.")
 
-    # Combine all images in strict sequential order
-    all_images = ss.captured_images + ss.uploaded_images
-    total_pending = len(ss.captured_images)
+    # Build image list: pending captured, then already uploaded (from camera or disk)
+    # Ensure they are sorted if order matters within these groups (e.g., by timestamp if available)
+    # For simplicity here, captured_images are appended, then uploaded_images are appended.
+    all_images_on_strip = ss.captured_images + ss.uploaded_images
 
-    # Create grid slots
-    total_slots = ROWS * COLS
+    # Determine type for styling/checkboxes
+    # 'pending' are from ss.captured_images, 'uploaded' are from ss.uploaded_images
+    num_pending = len(ss.captured_images)
+    all_types_on_strip = ["pending"] * num_pending + ["uploaded"] * len(
+        ss.uploaded_images
+    )
+
+    total_slots = ROWS * COLS  # Max slots to display in the grid
+
+    display_images = all_images_on_strip[:total_slots]
+    display_types = all_types_on_strip[:total_slots]
+
+    # Fill remaining display slots with 'empty' if fewer images than total_slots
+    while len(display_images) < total_slots:
+        display_images.append(None)
+        display_types.append("empty")
 
     for r in range(ROWS):
-        row = st.columns(COLS)
+        grid_cols = st.columns(COLS)
         for c in range(COLS):
-            slot_idx = r * COLS + c
-            with row[c]:
-                if slot_idx < len(all_images):
-                    img = all_images[slot_idx]
-                    is_uploaded = slot_idx >= total_pending
+            idx_in_grid = r * COLS + c
+            img_obj = display_images[idx_in_grid]
+            img_type = display_types[idx_in_grid]
 
-                    # Create container for image with overlay
-                    container_style = """
-                    <div style='position: relative; border-radius: 8px; overflow: hidden;'>
-                    """
-
-                    if is_uploaded:
-                        # Show uploaded indicator with green border and checkmark
-                        st.markdown(
-                            f"""
-                        <div style='position: relative; border: 3px solid #28a745; border-radius: 8px; overflow: hidden;'>
-                            <div style='position: absolute; top: 5px; right: 5px; 
-                                        background: #28a745; color: white; border-radius: 50%; 
-                                        width: 20px; height: 20px; display: flex; 
-                                        align-items: center; justify-content: center;
-                                        font-size: 12px; z-index: 10;'>✓</div>
-                        """,
-                            unsafe_allow_html=True,
-                        )
-                        st.image(img, use_container_width=True)
-                        st.markdown("</div>", unsafe_allow_html=True)
-                    else:
-                        # Pending shot with selection checkbox
-                        st.image(img, use_container_width=True)
-                        is_selected = st.checkbox(
-                            "", key=f"sel_{slot_idx}", label_visibility="collapsed"
-                        )
-                        if is_selected:
-                            ss.selected_shots.add(slot_idx)
-                        elif slot_idx in ss.selected_shots:
-                            ss.selected_shots.discard(slot_idx)
-                else:
-                    # Empty slot
+            with grid_cols[c]:
+                if img_type == "empty":
                     st.markdown(
-                        """
-                    <div style='border: 2px dashed #ccc; height: 120px; border-radius: 8px; 
-                                display: flex; align-items: center; justify-content: center;
-                                color: #999; font-size: 12px;'>
-                        Empty
-                    </div>
-                    """,
+                        "<div class='empty-film-slot'>Empty</div>",
                         unsafe_allow_html=True,
                     )
+                elif img_type == "uploaded":
+                    img_obj.seek(0)
+                    # Wrapper for green bar indicator
+                    st.markdown(
+                        "<div class='uploaded-indicator-wrapper'>",
+                        unsafe_allow_html=True,
+                    )
+                    st.image(img_obj, use_container_width=True)
+                    st.markdown(
+                        "<div class='uploaded-bar'>Uploaded</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+                else:  # 'pending'
+                    img_obj.seek(0)
+                    st.image(img_obj, use_container_width=True)
+                    # Checkbox is for images in ss.captured_images, its index is `idx_in_grid`
+                    # as long as `idx_in_grid` is less than `num_pending`.
+                    if (
+                        idx_in_grid < num_pending
+                    ):  # Only show checkbox for actual pending images
+                        st.checkbox(
+                            "",
+                            key=f"sel_pending_{idx_in_grid}",
+                            label_visibility="collapsed",
+                        )
+    st.divider()
 
-# --------------------------------------------
-# BUTTONS SECTION
-# --------------------------------------------
-with btn_col:
-    st.subheader("Actions")
+    # Action buttons for film strip (Upload/Delete PENDING shots)
+    action_col1, action_col2 = st.columns(2)
 
-    # Upload button
-    if st.button("📤\nUpload", key="btn_upload", use_container_width=True):
-        selected_indices = [i for i in ss.selected_shots if i < len(ss.captured_images)]
+    with action_col1:
+        if st.button(
+            "📤 Upload Selected Pending",
+            key="btn_film_strip_upload",
+            use_container_width=True,
+            type="primary",
+        ):
+            selected_pending_indices = [
+                i for i in range(num_pending) if ss.get(f"sel_pending_{i}", False)
+            ]
 
-        if not selected_indices:
-            st.warning("Select shots to upload first!")
-        elif not ss.event_code:
-            st.error("Select an event first!")
-        else:
-            ok, fails = 0, []
-            # Sort in reverse to maintain indices when removing
-            for idx in sorted(selected_indices, reverse=True):
-                res, suc = upload_image(ss.event_code, ss.captured_images[idx])
-                if suc:
-                    ok += 1
-                    # Move to uploaded list
-                    ss.uploaded_images.append(ss.captured_images[idx])
+            if not selected_pending_indices:
+                st.warning("No pending shots selected for upload.")
+            elif not ss.event_code:  # Should be caught by global check
+                st.error("Please select an event code first!")
+            else:
+                with st.spinner("Uploading selected pending shots..."):
+                    ok_film_upload, fails_film_upload = 0, []
+                    # Process in reverse to handle .pop() correctly
+                    for idx in sorted(selected_pending_indices, reverse=True):
+                        img_to_upload = ss.captured_images[idx]
+                        img_to_upload.seek(0)
+                        res, suc = upload_image(ss.event_code, img_to_upload)
+                        time.sleep(0.2)  # UX delay
+
+                        if suc:
+                            ok_film_upload += 1
+                            # Move from captured_images to uploaded_images
+                            ss.uploaded_images.insert(
+                                0, ss.captured_images.pop(idx)
+                            )  # Insert at start of uploaded to keep them visible
+                            if f"sel_pending_{idx}" in ss:
+                                del ss[f"sel_pending_{idx}"]
+                        else:
+                            fails_film_upload.append(f"Shot {idx+1}: {res}")
+
+                    if ok_film_upload > 0:
+                        st.toast(
+                            f"✅ Uploaded {ok_film_upload} pending shot(s)!", icon="🚀"
+                        )
+                    for msg in fails_film_upload:
+                        st.error(f"❌ {msg}")
+
+                    if ok_film_upload > 0 or fails_film_upload:
+                        st.rerun()
+    with action_col2:
+        if st.button(
+            "🗑️ Delete Selected Pending",
+            key="btn_film_strip_delete",
+            use_container_width=True,
+            type="secondary",
+        ):
+            selected_pending_indices_del = [
+                i for i in range(num_pending) if ss.get(f"sel_pending_{i}", False)
+            ]
+            if not selected_pending_indices_del:
+                st.warning("No pending shots selected for deletion.")
+            else:
+                for idx in sorted(selected_pending_indices_del, reverse=True):
                     ss.captured_images.pop(idx)
-                else:
-                    fails.append(f"Shot {idx+1}: {res}")
+                    if f"sel_pending_{idx}" in ss:
+                        del ss[f"sel_pending_{idx}"]
 
-            # Clear selections
-            ss.selected_shots = set()
-
-            if ok:
-                st.success(f"Uploaded {ok} shot(s)!")
-            for msg in fails:
-                st.error(msg)
-            st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Delete button
-    if st.button("🗑️\nDelete", key="btn_delete", use_container_width=True):
-        selected_indices = [i for i in ss.selected_shots if i < len(ss.captured_images)]
-
-        if not selected_indices:
-            st.warning("Select shots to delete first!")
-        else:
-            # Sort in reverse to maintain indices when removing
-            for idx in sorted(selected_indices, reverse=True):
-                ss.captured_images.pop(idx)
-
-            # Clear selections
-            ss.selected_shots = set()
-            st.success(f"Deleted {len(selected_indices)} shot(s)!")
-            st.rerun()
+                st.toast(
+                    f"🗑️ Deleted {len(selected_pending_indices_del)} pending shot(s).",
+                    icon="♻️",
+                )
+                st.rerun()
 
 # ─────────────────────────────────────────────
-# CUSTOM STYLING
+# STYLES
 # ─────────────────────────────────────────────
 st.markdown(
     """
 <style>
-/* Style the action buttons */
-div[data-testid="column"] button[kind="secondary"] {
-    height: 60px;
+/* Hide the default "Clear photo" button from st.camera_input */
+button[title="Clear photo"] {
+    display: none !important;
+}
+
+/* Custom Button Styling */
+button[data-testid="baseButton-primary"] { /* More specific selector for Streamlit 1.30+ */
+    background-color: #06d6a0 !important; /* Bright Green */
+    color: white !important;
+    border: none !important;
     font-weight: 600;
     border-radius: 8px;
-    border: none;
-    transition: all 0.2s;
 }
-
-/* Upload button - green */
-div[data-testid="column"] button[key="btn_upload"] {
-    background: linear-gradient(45deg, #28a745, #20c997) !important;
+button[data-testid="baseButton-primary"]:hover {
+    background-color: #05c794 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+button[data-testid="baseButton-secondary"] { /* More specific selector */
+    background-color: #ef476f !important; /* Bright Red */
     color: white !important;
+    border: none !important;
+    font-weight: 600;
+    border-radius: 8px;
+}
+button[data-testid="baseButton-secondary"]:hover {
+    background-color: #e63946 !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-div[data-testid="column"] button[key="btn_upload"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+/* Film Strip Styling */
+.stImage > img { /* Target images within Streamlit's image container */
+    border-radius: 4px; /* Rounded corners for all images in strip */
+    object-fit: cover; /* Ensure images cover their allocated space well */
+}
+.empty-film-slot {
+    border: 2px dashed #555;
+    height: 80px; /* Adjusted height */
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
+    font-size: 12px;
+    background-color: rgba(200,200,200,0.1);
 }
 
-/* Delete button - red */
-div[data-testid="column"] button[key="btn_delete"] {
-    background: linear-gradient(45deg, #dc3545, #fd7e14) !important;
-    color: white !important;
+/* Uploaded Image Indicator Styling */
+.uploaded-indicator-wrapper {
+    position: relative; /* Context for the absolute positioned bar */
+    border-radius: 4px; /* Match image radius */
+    overflow: hidden; /* Clip the bar if it somehow extends */
+    line-height: 0; /* Helps remove extra space around image sometimes */
+}
+.uploaded-indicator-wrapper .stImage > img {
+    display: block !important; /* Critical for removing bottom space for the bar */
+}
+.uploaded-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: rgba(6, 214, 160, 0.85); /* #06d6a0 with alpha - same as primary button */
+    color: white;
+    text-align: center;
+    font-weight: bold;
+    padding: 4px 0;
+    font-size: 0.75em; /* Slightly smaller font for the bar */
+    border-bottom-left-radius: 4px; /* Match wrapper/image radius */
+    border-bottom-right-radius: 4px; /* Match wrapper/image radius */
+    box-sizing: border-box;
 }
 
-div[data-testid="column"] button[key="btn_delete"]:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(220, 53, 69, 0.3);
-}
-
-/* Checkbox styling */
+/* Checkbox styling for better alignment if needed */
 div[data-testid="stCheckbox"] {
-    margin-top: 5px;
+    padding-top: 2px; /* Adjust spacing around checkbox */
+    margin-left: auto; /* Attempt to center or align right if container is flex */
+    margin-right: auto;
 }
 
-/* Film strip styling */
-div[data-testid="column"] img {
-    border-radius: 6px;
-    transition: transform 0.2s;
+/* General layout improvements */
+.stApp { /* Target the main app container */
+    /* background-color: #f0f2f6; /* Example: Light gray background for the whole app */
+}
+.stBlockLabel { /* Labels for widgets like selectbox, file_uploader */
+    font-weight: 500 !important;
 }
 
-div[data-testid="column"] img:hover {
-    transform: scale(1.02);
-}
 </style>
 """,
     unsafe_allow_html=True,
