@@ -15,7 +15,7 @@ def get_event_selection():
     from utils.api import get_events
 
     st.sidebar.title("Kanta")
-    st.sidebar.subheader("Face Recognition System")
+    st.sidebar.subheader("Collaborative Film Camera for Events")
 
     # Event selection
     available_events = get_events()

@@ -3,19 +3,32 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 import streamlit as st
+from datetime import datetime  # For type hinting
 
 # API Configuration, adjust if your backend API is on a different URL
-API_BASE_URL = os.getenv(
-    "BACKEND_SERVER_URL", "http://backend:8000"
-)
+API_BASE_URL = os.getenv("BACKEND_SERVER_URL", "http://backend:8000")
 
 
-def get_events():
+# Helper to construct full API URLs
+def _get_full_url(endpoint: str) -> str:
+    # If API_BASE_URL already includes /api/v1 or similar, adjust accordingly
+    # Example: if API_BASE_URL = "http://backend:8000" and endpoints are under /api/v1/events
+    # then it should be f"{API_BASE_URL}/api/v1{endpoint}"
+    # For now, assuming API_BASE_URL is the direct base for the endpoint path.
+    return f"{API_BASE_URL}{endpoint}"
+
+
+def get_events(event_code: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Fetch all available events from the API
     """
     try:
-        response = requests.get(f"{API_BASE_URL}/events")
+        response = requests.get(
+            f"{API_BASE_URL}/events?event_code={event_code}"
+            if event_code
+            else f"{API_BASE_URL}/events",
+            timeout=10,
+        )
         if response.status_code == 200:
             return response.json().get("events", [])
         else:
@@ -24,6 +37,86 @@ def get_events():
     except Exception as e:
         st.error(f"API connection error: {str(e)}")
         return []
+
+
+def create_event_api(
+    payload: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], bool, Optional[str]]:
+    """
+    Create a new event via the API.
+    Returns (event_data, success, error_message)
+    """
+    endpoint = "/events"
+    try:
+        # Pydantic expects datetimes as ISO strings. Convert if they are datetime objects.
+        if payload.get("start_date_time") and isinstance(
+            payload["start_date_time"], datetime
+        ):
+            payload["start_date_time"] = payload["start_date_time"].isoformat()
+        if payload.get("end_date_time") and isinstance(
+            payload["end_date_time"], datetime
+        ):
+            payload["end_date_time"] = payload["end_date_time"].isoformat()
+
+        response = requests.post(_get_full_url(endpoint), json=payload, timeout=10)
+        if response.status_code == 201:  # Created
+            return response.json(), True, None
+        else:
+            try:
+                detail = response.json().get("detail", response.text)
+            except requests.exceptions.JSONDecodeError:
+                detail = response.text
+            err_msg = f"Error creating event ({response.status_code}): {detail}"
+            print(err_msg)
+            return None, False, err_msg
+    except requests.exceptions.RequestException as e:
+        err_msg = f"API connection error creating event: {e}"
+        print(err_msg)
+        return None, False, err_msg
+    except Exception as e:
+        err_msg = f"An unexpected error occurred: {e}"
+        print(err_msg)
+        return None, False, err_msg
+
+
+def update_event_api(
+    payload: Dict[str, Any],
+) -> Tuple[Optional[Dict[str, Any]], bool, Optional[str]]:
+    """
+    Update an existing event via the API.
+    Returns (event_data, success, error_message)
+    """
+    endpoint = "/events"  # PUT request to the same base endpoint
+    try:
+        # Pydantic expects datetimes as ISO strings. Convert if they are datetime objects.
+        if payload.get("start_date_time") and isinstance(
+            payload["start_date_time"], datetime
+        ):
+            payload["start_date_time"] = payload["start_date_time"].isoformat()
+        if payload.get("end_date_time") and isinstance(
+            payload["end_date_time"], datetime
+        ):
+            payload["end_date_time"] = payload["end_date_time"].isoformat()
+
+        response = requests.put(_get_full_url(endpoint), json=payload, timeout=10)
+        if response.status_code == 200:  # OK
+            return response.json(), True, None
+        else:
+            try:
+                detail = response.json().get("detail", response.text)
+            except requests.exceptions.JSONDecodeError:
+                detail = response.text
+            err_msg = f"Error updating event ({response.status_code}): {detail}"
+            print(err_msg)
+            return None, False, err_msg
+    except requests.exceptions.RequestException as e:
+        err_msg = f"API connection error updating event: {e}"
+        print(err_msg)
+        return None, False, err_msg
+    except Exception as e:
+        err_msg = f"An unexpected error occurred: {e}"
+        print(err_msg)
+        return None, False, err_msg
 
 
 def upload_image(event_code: str, image_file):

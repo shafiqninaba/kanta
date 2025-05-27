@@ -4,6 +4,7 @@ import requests
 from io import BytesIO
 import base64
 import json
+from utils.image_helpers import fetch_image_bytes_from_url, crop_and_encode_face
 
 from utils.api import get_clusters  # Assuming this is in utils.api
 from utils.session import get_event_selection, init_session_state
@@ -26,58 +27,6 @@ ss.setdefault("people_sample_size", 5)
 ss.setdefault(
     "people_selected_clusters", {}
 )  # Stores {cluster_id: True/False} for selection
-
-
-# --- Helper Function to fetch image bytes ---
-@st.cache_data(ttl=3600)
-def fetch_image_bytes_from_url(image_url: str) -> BytesIO | None:
-    try:
-        response = requests.get(image_url, timeout=15)
-        response.raise_for_status()
-        return BytesIO(response.content)
-    except requests.exceptions.RequestException as e:
-        st.sidebar.error(
-            f"Error fetching image: {image_url[:50]}... Details in console."
-        )
-        print(f"Error fetching image data from {image_url[:60]}...: {e}")
-        return None
-
-
-# --- Helper Function to Crop and Encode Face ---
-def crop_and_encode_face(
-    full_image_bytes_io: BytesIO, bbox: dict, target_size: tuple
-) -> str | None:
-    try:
-        img = Image.open(full_image_bytes_io)
-        x, y, w, h = (
-            int(bbox["x"]),
-            int(bbox["y"]),
-            int(bbox["width"]),
-            int(bbox["height"]),
-        )
-        pad_w, pad_h = int(w * 0.3), int(h * 0.3)
-        crop_box = (
-            max(0, x - pad_w),
-            max(0, y - pad_h),
-            min(img.width, x + w + pad_w),
-            min(img.height, y + h + pad_h),
-        )
-        face_img = img.crop(crop_box)
-        face_img.thumbnail(target_size, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", target_size, (255, 255, 255))
-        paste_x = (target_size[0] - face_img.width) // 2
-        paste_y = (target_size[1] - face_img.height) // 2
-        canvas.paste(face_img, (paste_x, paste_y))
-        buffered = BytesIO()
-        canvas.save(buffered, format="PNG")
-        base64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{base64_str}"
-    except UnidentifiedImageError:
-        print(f"Error: Could not identify image for bbox {bbox}")
-    except Exception as e:
-        print(f"Error cropping/encoding face with bbox {bbox}: {e}")
-    return None
-
 
 # --- Main Application ---
 st.title("People")
@@ -238,7 +187,7 @@ else:
     col_btn_left, col_btn_mid, col_btn_right = st.columns([1, 1.5, 1])
     with col_btn_mid:
         if st.button(
-            f"🖼️ View Images of Selected ({len(selected_ids_for_button)})",
+            f"View Images of Selected ({len(selected_ids_for_button)}) People",
             key="view_selected_people_btn",
             type="primary",
             disabled=not selected_ids_for_button,
@@ -253,7 +202,7 @@ else:
             ss.gallery_date_to = None
             ss.gallery_min_faces = 0
             ss.gallery_max_faces = 0
-            st.switch_page("pages/02_Gallery.py")  # Corrected page name
+            st.switch_page("pages/03_Gallery.py")  # Corrected page name
 
     st.markdown("---")  # Separator after button
 
