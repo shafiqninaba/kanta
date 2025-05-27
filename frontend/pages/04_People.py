@@ -31,7 +31,7 @@ SWAP_INTERVAL_MS = 20000
 
 # --- Session State for this page ---
 ss = st.session_state
-ss.setdefault("people_sample_size", 5)
+ss.setdefault("people_sample_size", 1)
 ss.setdefault("people_selected_clusters", {})
 ss.setdefault("similarity_top_k", 10)
 ss.setdefault("similarity_metric", "cosine")
