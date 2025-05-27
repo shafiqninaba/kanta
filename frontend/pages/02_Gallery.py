@@ -54,7 +54,7 @@ def fetch_image_bytes_from_url(image_url: str) -> BytesIO | None:
 
 
 # --- Main Application ---
-st.title("🖼️ Image Gallery")
+st.title("Image Gallery")
 st.markdown(
     "Welcome to the Image Gallery! Explore images from your selected event. "
     "Use the filters below to refine your search, and click 'View Photo' for a closer look."
