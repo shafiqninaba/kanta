@@ -199,3 +199,55 @@ def get_clusters(event_code: str, sample_size: int = 5):
             )
     except Exception as e:
         return f"API connection error: {str(e)}", False
+
+
+def find_similar_faces_api(
+    event_code: str,
+    image_file_bytes: bytes,  # Pass the raw bytes of the image
+    image_filename: str,  # Filename for backend processing/logging
+    metric: str = "cosine",
+    top_k: int = 10,
+) -> Tuple[Optional[List[Dict[str, Any]]], bool, Optional[str]]:
+    """
+    Find similar faces by uploading an image to the API.
+    Returns (list_of_similar_face_dicts OR None, success_boolean, error_message_str OR None)
+    """
+    endpoint = "/find-similar"  # Corrected endpoint based on your router
+    params = {
+        "event_code": event_code,
+        "metric": metric,
+        "top_k": top_k,
+    }
+    # The 'image' needs to be sent as a file in a multipart/form-data request
+    files = {
+        "image": (image_filename, image_file_bytes, "image/jpeg")
+    }  # Assuming jpeg, adjust if needed or detect
+
+    try:
+        # print(f"DEBUG: Calling find_similar_faces_api. Params: {params}, Files: {image_filename}")
+        response = requests.post(
+            _get_full_url(endpoint), params=params, files=files, timeout=30
+        )  # Increased timeout for potential processing
+
+        if response.status_code == 200:
+            return (
+                response.json(),
+                True,
+                None,
+            )  # API returns List[SimilarFaceOut] directly
+        else:
+            try:
+                detail = response.json().get("detail", response.text)
+            except requests.exceptions.JSONDecodeError:
+                detail = response.text
+            err_msg = f"Error finding similar faces ({response.status_code}): {detail}"
+            print(err_msg)
+            return None, False, err_msg
+    except requests.exceptions.RequestException as e:
+        err_msg = f"API connection error for similarity search: {e}"
+        print(err_msg)
+        return None, False, err_msg
+    except Exception as e:
+        err_msg = f"An unexpected error occurred during similarity search: {e}"
+        print(err_msg)
+        return None, False, err_msg
