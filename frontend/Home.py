@@ -32,7 +32,9 @@ if not st.session_state.get("event_code"):  # Use .get for safer access
     st.warning(
         "👈 Please select an event from the sidebar, or create a new one in 'Event Management' to get started!"
     )
-    st.page_link("pages/01_Event_Management", label="Go to Event Management", icon="⚙️")
+    st.page_link(
+        "pages/01_Event_Management.py", label="Go to Event Management", icon="⚙️"
+    )
 
 else:
     event_name_display = st.session_state.get("event_name", st.session_state.event_code)
@@ -70,5 +72,5 @@ st.caption("Kanta: Capturing memories, together.")
 if not st.session_state.get("event_code"):
     if st.button("Create or Select an Event First"):
         st.switch_page(
-            "pages/01_Event_Management"
+            "pages/01_Event_Management.py"
         )  # Or your event management page filename
