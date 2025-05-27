@@ -23,6 +23,9 @@ SWAP_INTERVAL_MS = 20000
 # --- Session State for this page ---
 ss = st.session_state
 ss.setdefault("people_sample_size", 5)
+ss.setdefault(
+    "people_selected_clusters", {}
+)  # Stores {cluster_id: True/False} for selection
 
 
 # --- Helper Function to fetch image bytes ---
@@ -52,8 +55,7 @@ def crop_and_encode_face(
             int(bbox["width"]),
             int(bbox["height"]),
         )
-
-        pad_w, pad_h = int(w * 0.2), int(h * 0.2)
+        pad_w, pad_h = int(w * 0.3), int(h * 0.3)
         crop_box = (
             max(0, x - pad_w),
             max(0, y - pad_h),
@@ -62,12 +64,10 @@ def crop_and_encode_face(
         )
         face_img = img.crop(crop_box)
         face_img.thumbnail(target_size, Image.Resampling.LANCZOS)
-
         canvas = Image.new("RGB", target_size, (255, 255, 255))
         paste_x = (target_size[0] - face_img.width) // 2
         paste_y = (target_size[1] - face_img.height) // 2
         canvas.paste(face_img, (paste_x, paste_y))
-
         buffered = BytesIO()
         canvas.save(buffered, format="PNG")
         base64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
@@ -82,8 +82,8 @@ def crop_and_encode_face(
 # --- Main Application ---
 st.title("People")
 st.markdown(
-    "Discover unique individuals detected in the event images. "
-    "Each circle represents a person, showing sample faces. Click 'View Images' to see all photos of that person."
+    "Select individuals from the list below to view images containing them. "
+    "Each circle represents a person, showing sample faces."
 )
 
 if not ss.get("event_code"):
@@ -101,11 +101,11 @@ new_sample_size = st.slider(
 )
 if new_sample_size != ss.people_sample_size:
     ss.people_sample_size = new_sample_size
+    # Clear previous selections if sample size changes, as the list of people might change
+    ss.people_selected_clusters = {}
 
-st.markdown("---")  # Separator
 
-# --- Removed Central Navigation Button ---
-# The navigation will now be per-person card.
+st.markdown("---")
 
 # --- Fetch and Process Data ---
 with st.spinner(f"Loading people data with {ss.people_sample_size} samples each..."):
@@ -137,12 +137,9 @@ for person_idx, cluster_info in enumerate(person_clusters_data):
     cluster_id = cluster_info.get("cluster_id")
     item_count = cluster_info.get("face_count", 0)
     samples = cluster_info.get("samples", [])
-
     cropped_sample_face_urls = []
     if samples:
-        for sample_idx, sample in enumerate(
-            samples
-        ):  # Added sample_idx for more robust key generation if needed
+        for sample_idx, sample in enumerate(samples):
             full_image_url = sample.get("sample_blob_url")
             bbox = sample.get("sample_bbox")
             if full_image_url and isinstance(bbox, dict):
@@ -153,13 +150,11 @@ for person_idx, cluster_info in enumerate(person_clusters_data):
                     )
                     if encoded_face:
                         cropped_sample_face_urls.append(encoded_face)
-
     initial_face_url = (
         cropped_sample_face_urls[0]
         if cropped_sample_face_urls
         else "https://via.placeholder.com/150/CCCCCC/808080?text=No+Sample"
     )
-
     people_display_data.append(
         {
             "original_cluster_id": cluster_id,
@@ -167,11 +162,11 @@ for person_idx, cluster_info in enumerate(person_clusters_data):
             "item_count": item_count,
             "initial_face_url": initial_face_url,
             "sample_face_data_urls": cropped_sample_face_urls,
-            "js_image_id": f"person_img_{cluster_id}_{person_idx}",  # Added person_idx for guaranteed unique js_image_id
+            "js_image_id": f"person_img_{cluster_id}_{person_idx}",
         }
     )
 
-# --- Display Identified People in a Grid ---
+# --- Display Identified People in a Grid with Selection ---
 if not person_clusters_data:
     st.info("No identified people to display for this event yet.")
 elif not people_display_data and person_clusters_data:
@@ -180,28 +175,46 @@ elif not people_display_data and person_clusters_data:
     )
 else:
     st.subheader(f"Identified People: {len(people_display_data)}")
+    st.markdown("Select one or more people below:")
+
     grid_cols = st.columns(PERSON_CARD_COLS)
     for i, person_display in enumerate(people_display_data):
         with grid_cols[i % PERSON_CARD_COLS]:
+            cluster_id = person_display["original_cluster_id"]
             js_image_list = json.dumps(person_display["sample_face_data_urls"])
 
-            # HTML for the image and label part of the card
+            # Checkbox for selection
+            # The value comes from session state to persist selections across reruns
+            is_person_selected = st.checkbox(
+                f"Select Person {person_display['display_id']}",
+                value=ss.people_selected_clusters.get(cluster_id, False),
+                key=f"select_person_{cluster_id}_{i}",
+                label_visibility="collapsed",  # Hide label, use card visuals
+            )
+            # Update session state based on checkbox interaction
+            ss.people_selected_clusters[cluster_id] = is_person_selected
+
+            # Visual indication of selection on the card itself (optional)
+            border_style = (
+                "border: 3px solid #007bff;"
+                if is_person_selected
+                else "border: 3px solid #f0f2f6;"
+            )
+
             person_card_content_html = f"""
-            <div class="person-card-visuals"> 
+            <div class="person-card-visuals" style="{border_style} padding: 5px; border-radius: 8px;"> 
                 <img id="{person_display['js_image_id']}" 
                      src="{person_display['initial_face_url']}" 
                      class="person-face-circle" 
                      alt="Person {person_display['display_id']}" 
-                     title="Person {person_display['display_id']}: {person_display['item_count']} items">
-                <p class="person-label">Person {person_display['display_id']}: {person_display['item_count']} items</p>
+                     title="Person {person_display['display_id']}: {person_display['item_count']} items. Click checkbox above to select.">
+                <p class="person-label">Person {person_display['display_id']} ({person_display['item_count']})</p>
             </div>
             <script>
-                // Image cycling script
                 if (!document.getElementById("{person_display['js_image_id']}").dataset.swapperActive) {{
                     let images_{person_display['js_image_id']} = {js_image_list};
                     let currentIndex_{person_display['js_image_id']} = 0;
                     let imgElement_{person_display['js_image_id']} = document.getElementById("{person_display['js_image_id']}");
-                    
                     if (imgElement_{person_display['js_image_id']} && images_{person_display['js_image_id']}.length > 1) {{
                         setInterval(function() {{
                             currentIndex_{person_display['js_image_id']} = (currentIndex_{person_display['js_image_id']} + 1) % images_{person_display['js_image_id']}.length;
@@ -216,54 +229,52 @@ else:
             """
             st.markdown(person_card_content_html, unsafe_allow_html=True)
 
-            # --- Centered Button for this specific person ---
-            button_key = f"view_person_btn_{person_display['original_cluster_id']}_{i}"
+    # Button to View Images of Selected People - Placed above the grid
+    selected_ids_for_button = [
+        cid for cid, selected in ss.people_selected_clusters.items() if selected
+    ]
 
-            # Use 3 columns to center the button.
-            # The middle column will contain the button.
-            # Adjust ratios: [spacer_left, button_content, spacer_right]
-            # e.g., [1, 1.5, 1] means the button column is 1.5 times the width of spacers.
-            # If the button text is short, a ratio like [1,1,1] might also work well,
-            # or even [0.5, 1, 0.5] if you want less aggressive spacing on sides.
-            # Let's try [1, 1.2, 1] for a moderately sized center column for the button.
-            _col_spacer_left, col_button_center, _col_spacer_right = st.columns(
-                [1, 1.2, 1]
+    # Use columns to make the button not full width
+    col_btn_left, col_btn_mid, col_btn_right = st.columns([1, 1.5, 1])
+    with col_btn_mid:
+        if st.button(
+            f"🖼️ View Images of Selected ({len(selected_ids_for_button)})",
+            key="view_selected_people_btn",
+            type="primary",
+            disabled=not selected_ids_for_button,
+            use_container_width=True,
+        ):
+            ss.gallery_filter_cluster_list = (
+                selected_ids_for_button  # Store list for gallery
             )
+            ss.gallery_page = 1  # Reset gallery page
+            # Clear other gallery filters if you want a fresh view for these clusters
+            ss.gallery_date_from = None
+            ss.gallery_date_to = None
+            ss.gallery_min_faces = 0
+            ss.gallery_max_faces = 0
+            st.switch_page("pages/02_Gallery.py")  # Corrected page name
 
-            with col_button_center:
-                if st.button(
-                    "View Images",
-                    key=button_key,
-                    type="primary",  # This should make it blue
-                    use_container_width=True,  # Make button fill the middle column
-                ):
-                    ss.browse_filter_cluster_id = person_display["original_cluster_id"]
-                    ss.gallery_page = 1
-                    st.switch_page("pages/02_Gallery.py")
+    st.markdown("---")  # Separator after button
 
-# --- Display Unassigned and Processing Information ---
+# --- Display Unassigned and Processing Information (remains the same) ---
 st.markdown("---")
-
-# Display Unassigned Faces Information (if any)
 if unassigned_info:
     count = unassigned_info.get("face_count", 0)
     samples = unassigned_info.get("samples", [])
-
-    st.subheader(f"Unidentified People: {count}")  # Display count in subheader
+    st.subheader(f"Unidentified People: {count}")
     expander_title = "Click to view samples"
     if count == 0:
         expander_title = "No unidentified faces"
     elif not samples:
         expander_title = f"{count} unidentified (no samples available)"
 
-    with st.expander(
-        expander_title, expanded=(count > 0 and len(samples) > 0)
-    ):  # Expand if there's something to show
+    with st.expander(expander_title, expanded=(count > 0 and len(samples) > 0)):
         if count > 0 and not samples:
             st.write("Samples for unidentified faces are not available at the moment.")
         elif count == 0:
             st.write("No unidentified faces found.")
-        elif not samples:  # Should be caught by above, but as a fallback
+        elif not samples:
             st.write("No samples to display for unidentified faces.")
         else:
             unassigned_face_urls = []
@@ -278,7 +289,6 @@ if unassigned_info:
                         )
                         if encoded_face:
                             unassigned_face_urls.append(encoded_face)
-
             if not unassigned_face_urls:
                 st.write("Could not process samples for unidentified faces.")
             else:
@@ -287,40 +297,34 @@ if unassigned_info:
                     img_cols = st.columns(cols_per_row)
                     for i, face_url in enumerate(unassigned_face_urls):
                         img_cols[i % cols_per_row].image(face_url, width=80)
-elif (
-    person_clusters_data
-):  # Only show this if there were identified people but no unassigned cluster
+elif person_clusters_data:
     st.subheader("Unidentified People: 0")
     st.info("No faces are currently marked as unidentified for this event.")
-
-# Display Processing Information (if any)
 if processing_info:
     count = processing_info.get("face_count", 0)
-    if count > 0:  # Only show if there are faces being processed
-        st.markdown("---")  # Separator
+    if count > 0:
+        st.markdown("---")
         st.info(
             f"**{count} faces are currently being processed** for person identification and are not yet categorized."
         )
-
 
 # --- Custom CSS ---
 st.markdown(
     f"""
 <style>
-    /* Styles for the container of image and label within each card */
     .person-card-visuals {{
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
-        margin-bottom: 10px; /* Space between visuals and button */
+        margin-bottom: 10px; 
     }}
     .person-face-circle {{
         width: {SAMPLE_FACE_DISPLAY_SIZE[0]}px;
         height: {SAMPLE_FACE_DISPLAY_SIZE[1]}px;
         border-radius: 50%;
         object-fit: cover;
-        border: 3px solid #f0f2f6;
+        /* border removed here, applied dynamically via style attribute */
         margin-bottom: 10px;
         background-color: #e0e0e0;
         transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
@@ -331,16 +335,25 @@ st.markdown(
     }}
     .person-label {{
         font-weight: bold;
-        font-size: 1.0em;
-        margin-bottom: 0px; /* Reduced bottom margin for label */
+        font-size: 0.9em; /* Slightly smaller label */
+        margin-bottom: 0px; 
         color: #333;
+        white-space: nowrap; /* Prevent wrapping for short labels */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
     }}
-
-    /* Ensure Streamlit columns (acting as cards) have some bottom margin */
     div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] {{
-        margin-bottom: 20px; /* Add some space below each card (column content) */
+        padding-bottom: 15px; 
+        margin-bottom: 20px; 
     }}
-
+    /* Ensure checkboxes are somewhat aligned with the card content */
+    div[data-testid="stCheckbox"] {{
+        display: flex;
+        justify-content: center; /* Center the checkbox itself */
+        padding-top: 5px;      /* Space above checkbox */
+        padding-bottom: 5px;   /* Space below checkbox before image card */
+    }}
     div[data-testid="stExpander"] div[data-testid="stVerticalBlock"] div[data-testid="stImage"] img {{
         border-radius: 50%;
         object-fit: cover;
