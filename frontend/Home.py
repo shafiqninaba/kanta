@@ -31,13 +31,13 @@ def main():
     get_event_selection()
 
     # header
-    st.title("📸 Kanta | Collaborative Event Photos")
+    st.title("Kanta | Collaborative Event Photos")
     st.markdown(
         "_A collaborative film camera app for events, with built-in face detection and "
         "automatic photo organization._"
     )
-    st.markdown("### /kæntæ/  –  _‘lens’ in Malay_")
     st.markdown(
+        "#### /kæntæ/  –  _ meaning ‘lens’ in Malay_\n"
         "Kanta lets event participants capture, share, and organize photos in a shared "
         "digital camera roll, automatically grouping moments by person."
     )
@@ -49,7 +49,7 @@ def main():
         {
             "title": "1. Event Setup (Admin)",
             "description": "Create or manage events, and generate a unique Event Code.",
-            "page": "pages/01_Event_Management.py",
+            "page": "pages/01_Events.py",
             "link_label": "Go to Event Management ›",
             "icon": "🗂",
             "image_src": "https://via.placeholder.com/300x200?text=Event+Setup",
