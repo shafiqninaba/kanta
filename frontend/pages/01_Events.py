@@ -23,7 +23,9 @@ def main() -> None:
     st.title("🎭 Events")
     tab_current, tab_create = st.tabs(["Current Event", "Create New Event"])
 
-    # --- Current Event Tab ---
+    # --------------------------------------------------------------------
+    # Current Event Tab
+    # --------------------------------------------------------------------
     with tab_current:
         st.subheader("Current Event")
         if not ss.get("event_code"):
@@ -108,7 +110,9 @@ def main() -> None:
                         ss.edit_mode = True
                         st.rerun()
 
-    # --- Create New Event Tab ---
+    # --------------------------------------------------------------------
+    # Create New Event Tab
+    # --------------------------------------------------------------------
     with tab_create:
         st.subheader("Create New Event")
         with st.form(key="create_event_form"):
@@ -122,7 +126,11 @@ def main() -> None:
                 placeholder="My Awesome Event",
                 help="Optional name for the event.",
             )
-            desc_in = st.text_area("Description", placeholder="Awesome event details...", help="Optional description of the event.")
+            desc_in = st.text_area(
+                "Description",
+                placeholder="Awesome event details...",
+                help="Optional description of the event.",
+            )
 
             # Date and time inputs
             cols = st.columns(4)
