@@ -122,11 +122,7 @@ def main() -> None:
                 placeholder="My Awesome Event",
                 help="Optional name for the event.",
             )
-            desc_in = st.text_area(
-                "Description",
-                placeholder="Awesome event details...",
-                help="Optional description of the event.",
-            )
+            desc_in = st.text_area("Description", placeholder="Awesome event details...", help="Optional description of the event.")
 
             # Date and time inputs
             cols = st.columns(4)
