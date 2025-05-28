@@ -1,76 +1,102 @@
 import streamlit as st
 from utils.session import get_event_selection, init_session_state
 
-
 st.set_page_config(
-    page_title="Kanta Event Photos",  # Updated title
-    page_icon="📸",  # Changed icon to a camera
+    page_title="Kanta | Collaborative Event Photos",
+    page_icon="📸",
     layout="wide",
 )
 
-# Initialize session state (ensures common variables like event_code exist)
-init_session_state()
 
-# Display sidebar with event selection
-get_event_selection()
+def render_step(step: dict):
+    """Render one instruction step with image + text in two columns."""
+    col_img, col_txt = st.columns([2, 3])
+    with col_img:
+        # TODO: replace `image_src` with your own screenshot/GIF URL or local path
+        st.image(step["image_src"], width=300, caption=step["caption"])
+    with col_txt:
+        st.subheader(step["title"])
+        st.write(step["description"])
+        st.page_link(
+            page=step["page"],
+            label=step["link_label"],
+            icon=step["icon"],
+            use_container_width=True,
+        )
 
-# Main content for home page
-st.title("📸 Kanta - Collaborative Event Photos")  # Updated title
 
-st.markdown("""
-    ### Welcome to Kanta!
-    
-    Kanta helps you and your guests capture and organize photos from any event. 
-    It's like a shared digital camera roll that automatically identifies people and groups their photos together, 
-    making it easy to find every moment.
-""")
+def main():
+    # init
+    init_session_state()
+    get_event_selection()
 
-st.markdown("---")
-
-# Check if event is selected
-if not st.session_state.get("event_code"):  # Use .get for safer access
-    st.warning(
-        "👈 Please select an event from the sidebar, or create a new one in 'Event Management' to get started!"
-    )
-    st.page_link(
-        "pages/01_Event_Management.py", label="Go to Event Management", icon="⚙️"
-    )
-
-else:
-    event_name_display = st.session_state.get("event_name", st.session_state.event_code)
-    st.success(
-        f"🎉 You're currently viewing event: **{event_name_display}** (`{st.session_state.event_code}`)"
-    )
+    # header
+    st.title("📸 Kanta | Collaborative Event Photos")
     st.markdown(
-        "Use the navigation menu on the left to explore the event's photos and features."
+        "_A collaborative film camera app for events, with built-in face detection and "
+        "automatic photo organization._"
     )
+    st.markdown("### /kæntæ/  –  _‘lens’ in Malay_")
+    st.markdown(
+        "Kanta lets event participants capture, share, and organize photos in a shared "
+        "digital camera roll, automatically grouping moments by person."
+    )
+    st.divider()
 
-st.markdown("---")
+    # instruction steps
+    st.markdown("## How to Use Kanta")
+    steps = [
+        {
+            "title": "1. Event Setup (Admin)",
+            "description": "Create or manage events, and generate a unique Event Code.",
+            "page": "pages/01_Event_Management.py",
+            "link_label": "Go to Event Management ›",
+            "icon": "🗂",
+            "image_src": "https://via.placeholder.com/300x200?text=Event+Setup",
+            "caption": "Event Management",
+        },
+        {
+            "title": "2. Capture & Upload",
+            "description": (
+                "Share your Event Code or use the Camera & Upload page to collect "
+                "photos in real time."
+            ),
+            "page": "pages/02_Camera.py",
+            "link_label": "Go to Camera & Upload ›",
+            "icon": "📷",
+            "image_src": "https://via.placeholder.com/300x200?text=Capture+%26+Upload",
+            "caption": "Camera & Upload",
+        },
+        {
+            "title": "3. Browse Gallery",
+            "description": (
+                "Filter by date, faces, or specific people. Download individual photos or batches."
+            ),
+            "page": "pages/03_Gallery.py",
+            "link_label": "Go to Image Gallery ›",
+            "icon": "🖼️",
+            "image_src": "https://via.placeholder.com/300x200?text=Image+Gallery",
+            "caption": "Image Gallery",
+        },
+        {
+            "title": "4. Discover People",
+            "description": (
+                "Explore auto-detected faces, view all photos of someone, or search by example image."
+            ),
+            "page": "pages/04_People.py",
+            "link_label": "Go to People Discovery ›",
+            "icon": "👥",
+            "image_src": "https://via.placeholder.com/300x200?text=People+%26+Similarity",
+            "caption": "People & Similarity",
+        },
+    ]
 
-st.subheader("How to Use Kanta:")
-st.markdown("""
-    1.  **Event Setup (Admin)**:
-        *   Navigate to **[01 Event Management](01_Event_Management)** to create a new event or manage existing ones. 
-        *   Set the event name, description, and duration. You'll get a unique Event Code.
+    for step in steps:
+        render_step(step)
+        st.divider()
 
-    2.  **Capture & Upload Photos**:
-        *   During the event, use the **[02 Camera & Upload](02_Camera_Upload)** page (or share the Event Code with guests for them to upload).
-        *   Easily upload photos from your phone or computer, or take new ones directly if your device supports it.
+    st.caption("Kanta: Capturing memories, together.")
 
-    3.  **Browse & Explore**:
-        *   Go to **[03 Image Gallery](03_Image_Gallery)** to see all uploaded photos. Filter by date, number of faces, or specific people.
-        *   Download your favorite shots individually or as a batch.
 
-    4.  **Discover People**:
-        *   Visit **[04 People & Similarity](04_People_Similarity)** to see who Kanta has automatically identified. 
-        *   Select people to view all photos they appear in, or use the similarity search to find someone by uploading an example photo.
-""")
-
-st.markdown("---")
-st.caption("Kanta: Capturing memories, together.")
-
-if not st.session_state.get("event_code"):
-    if st.button("Create or Select an Event First"):
-        st.switch_page(
-            "pages/01_Event_Management.py"
-        )  # Or your event management page filename
+if __name__ == "__main__":
+    main()
