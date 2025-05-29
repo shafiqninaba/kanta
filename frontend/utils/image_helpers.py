@@ -1,81 +1,119 @@
-# utils/image_helpers.py
-
 import base64
 from io import BytesIO
+from typing import Any, Dict, Optional, Tuple
 
 import requests
-import streamlit as st  # For st.sidebar.error in fetch_image_bytes_from_url
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
 
 
-@st.cache_data(ttl=3600)  # Keep caching here as it's data fetching
-def fetch_image_bytes_from_url(image_url: str) -> BytesIO | None:
-    """Fetches image bytes from a URL. Cached for 1 hour."""
+def apply_filter_to_image(image: Image.Image, filter_mode: str) -> Image.Image:
+    """
+    Apply a visual filter to a PIL Image.
+
+    Args:
+        image: Original PIL Image.
+        filter_mode: One of ['Normal', 'Black & White', 'Warm', 'Cool', 'Sepia'].
+
+    Returns:
+        A new PIL Image object with the filter applied.
+    """
+    if filter_mode == "Black & White":
+        return image.convert("L").convert("RGB")
+
+    if filter_mode == "Warm":
+        enhancer = ImageEnhance.Color(image)
+        warm_img = enhancer.enhance(1.3)
+        overlay = Image.new("RGB", image.size, (255, 230, 200))
+        return Image.blend(warm_img, overlay, 0.15)
+
+    if filter_mode == "Cool":
+        enhancer = ImageEnhance.Color(image)
+        cool_img = enhancer.enhance(0.9)
+        overlay = Image.new("RGB", image.size, (200, 230, 255))
+        return Image.blend(cool_img, overlay, 0.15)
+
+    if filter_mode == "Sepia":
+        return ImageOps.colorize(image.convert("L"), black="#704214", white="#C0A080")
+
+    return image
+
+
+def fetch_image_bytes_from_url(url: str, timeout: int = 15) -> Optional[BytesIO]:
+    """
+    Download image data from a URL and return it as a BytesIO stream.
+
+    Args:
+        url: The web address of the image.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        BytesIO containing the image data, or None on failure.
+
+    Raises:
+        requests.HTTPError: On non-200 response codes.
+        requests.RequestException: On network-related errors.
+    """
     try:
-        response = requests.get(image_url, timeout=15)
+        response = requests.get(url, timeout=timeout)
         response.raise_for_status()
         return BytesIO(response.content)
-    except requests.exceptions.RequestException as e:
-        # Using st.sidebar.error might be problematic if this util is used
-        # in non-Streamlit contexts or before sidebar is fully available.
-        # Consider just printing or logging, or making error display conditional.
-        # For now, keeping it, but be mindful.
-        st.sidebar.error(f"Error fetching image (see console): {image_url[:50]}...")
-        print(f"Error fetching image data from {image_url[:60]}...: {e}")
-        return None
+
+    except Exception:
+        raise
 
 
 def crop_and_encode_face(
-    full_image_bytes_io: BytesIO,
-    bbox: dict,
-    target_size: tuple,
-    padding_w_factor: float = 0.3,  # Default padding factor for width
-    padding_h_factor: float = 0.3,  # Default padding factor for height
-) -> str | None:
+    full_image_stream: BytesIO,
+    bbox: Dict[str, Any],
+    target_size: Tuple[int, int],
+    padding_w_factor: float = 0.3,
+    padding_h_factor: float = 0.3,
+) -> Optional[str]:
     """
-    Crops a face from an image, resizes with padding, and returns as base64 data URL.
-    padding_w_factor and padding_h_factor are percentages of the bbox width/height.
+    Crop a face region from an image, resize with padding, and return a base64-encoded PNG URI.
+
+    Args:
+        full_image_stream: BytesIO stream of the full image.
+        bbox: Dictionary with keys 'x', 'y', 'width', 'height' specifying the face box.
+        target_size: (width, height) of the output image.
+        padding_w_factor: Fractional padding of bbox width on each side.
+        padding_h_factor: Fractional padding of bbox height on each side.
+
+    Returns:
+        A data URL (str) containing the PNG-encoded face image, or None on error.
     """
     try:
-        img = Image.open(full_image_bytes_io)
-        x, y, w, h = (
-            int(bbox["x"]),
-            int(bbox["y"]),
-            int(bbox["width"]),
-            int(bbox["height"]),
-        )
+        img = Image.open(full_image_stream)
+        x = int(bbox.get("x", 0))
+        y = int(bbox.get("y", 0))
+        w = int(bbox.get("width", 0))
+        h = int(bbox.get("height", 0))
 
-        # Calculate padding in pixels based on factors
-        pad_w_px = int(w * padding_w_factor)
-        pad_h_px = int(h * padding_h_factor)
+        pad_w = int(w * padding_w_factor)
+        pad_h = int(h * padding_h_factor)
 
-        crop_box = (
-            max(0, x - pad_w_px),
-            max(0, y - pad_h_px),
-            min(img.width, x + w + pad_w_px),
-            min(img.height, y + h + pad_h_px),
-        )
-        face_img = img.crop(crop_box)
+        left = max(0, x - pad_w)
+        top = max(0, y - pad_h)
+        right = min(img.width, x + w + pad_w)
+        bottom = min(img.height, y + h + pad_h)
 
-        if face_img.width == 0 or face_img.height == 0:
-            print(f"Warning: Cropped image has zero dimension for bbox {bbox}")
-            return None  # Avoid error with thumbnailing zero-size image
+        face = img.crop((left, top, right, bottom))
+        if face.width == 0 or face.height == 0:
+            return None
 
-        face_img.thumbnail(target_size, Image.Resampling.LANCZOS)
+        face.thumbnail(target_size, Image.Resampling.LANCZOS)
+        canvas = Image.new("RGB", target_size, (255, 255, 255))
+        paste_x = (target_size[0] - face.width) // 2
+        paste_y = (target_size[1] - face.height) // 2
+        canvas.paste(face, (paste_x, paste_y))
 
-        # Create a canvas and paste the (potentially smaller) thumbnail onto it
-        # to ensure the final image is exactly target_size, letterboxed if necessary.
-        canvas = Image.new("RGB", target_size, (255, 255, 255))  # White background
-        paste_x = (target_size[0] - face_img.width) // 2
-        paste_y = (target_size[1] - face_img.height) // 2
-        canvas.paste(face_img, (paste_x, paste_y))
+        buffer = BytesIO()
+        canvas.save(buffer, format="PNG")
+        b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{b64}"
 
-        buffered = BytesIO()
-        canvas.save(buffered, format="PNG")  # PNG supports transparency if needed later
-        base64_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{base64_str}"
-    except UnidentifiedImageError:
-        print(f"Error: Could not identify image for bbox {bbox} during face cropping.")
-    except Exception as e:
-        print(f"Error cropping/encoding face with bbox {bbox}: {e}")
-    return None
+    except (UnidentifiedImageError, OSError):
+        return None
+    except Exception:
+        # Let caller handle unexpected errors
+        raise
