@@ -1,6 +1,9 @@
+from datetime import datetime
+from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.base import get_db
@@ -64,32 +67,40 @@ async def list_events(
     "",
     response_model=EventInfo,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new event",
+    summary="Create a new event (with optional image)",
 )
 async def create_event_endpoint(
-    payload: CreateEventInput,
+    *,
+    event_code: str,
+    name: str | None = None,
+    description: str | None = None,
+    start_date_time: datetime | None = None,
+    end_date_time: datetime | None = None,
+    event_image_file: UploadFile | None = File(None, description="jpg/png"),
     db: AsyncSession = Depends(get_db),
 ) -> EventInfo:
     """
-    Create a new event in the system.
-
-    Args:
-        payload (CreateEventInput): Input data including code, name, description, and timestamps.
-        db (AsyncSession): Async SQLAlchemy session for database access.
-
-    Returns:
-        EventInfo: Details of the newly created event.
-
-    Raises:
-        HTTPException 400: If an event with the same code already exists.
+    Create an Event, optionally uploading an image.
+    Generates a QR code pointing to `/events/{code}`.
     """
     try:
-        event = await create_event(db, payload)
+        event = await create_event(
+            db,
+            code=event_code,
+            name=name,
+            description=description,
+            start_date_time=start_date_time,
+            end_date_time=end_date_time,
+            event_image_file=event_image_file,
+        )
+    except IntegrityError as exc:
+        raise HTTPException(400, "Event code already exists") from exc
     except EventAlreadyExists as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
     return event
 
 
@@ -126,6 +137,11 @@ async def update_event_endpoint(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
     return event
 
 
@@ -156,5 +172,10 @@ async def delete_event_endpoint(
     except EventNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )

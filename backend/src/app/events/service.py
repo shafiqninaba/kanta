@@ -1,5 +1,10 @@
+import base64
+from datetime import datetime
+from io import BytesIO
 from typing import List, Optional
 
+from fastapi import UploadFile
+import qrcode
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -66,36 +71,45 @@ async def get_event(db: AsyncSession, code: str) -> Event:
 # --------------------------------------------------------------------
 # CREATE EVENT
 # --------------------------------------------------------------------
-async def create_event(db: AsyncSession, payload: CreateEventInput) -> Event:
-    """
-    Create a new Event record in the database.
-
-    Args:
-        db (AsyncSession): The async database session.
-        payload (CreateEventInput): Pydantic model containing the event code, name,
-            description, start_date_time, and end_date_time.
-
-    Returns:
-        Event: The newly created Event ORM instance, with all fields populated (including id and created_at).
-
-    Raises:
-        EventAlreadyExists: If an Event with the same code already exists (unique constraint violation).
-    """
+async def create_event(
+    db: AsyncSession,
+    code: str,
+    name: str | None,
+    description: str | None,
+    start_date_time: datetime | None,
+    end_date_time: datetime | None,
+    event_image_file: UploadFile | None,
+) -> Event:
     new_event = Event(
-        code=payload.event_code,
-        name=payload.name,
-        description=payload.description,
-        start_date_time=payload.start_date_time,
-        end_date_time=payload.end_date_time,
+        code=code,
+        name=name,
+        description=description,
+        start_date_time=start_date_time,
+        end_date_time=end_date_time,
     )
+
+    # If an image was uploaded, read into bytes:
+    if event_image_file:
+        buf = await event_image_file.read()
+        new_event.event_image = buf
+
+    # Generate a QR code for your link:
+    qr = qrcode.QRCode(box_size=10, border=2)
+    qr.add_data(f"https://your.domain.com/events/{code}")
+    qr.make(fit=True)
+    img = qr.make_image()
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    new_event.qr_code_image = buf.getvalue()
+
     db.add(new_event)
     try:
         await db.commit()
         await db.refresh(new_event)
-    except IntegrityError as exc:
+    except IntegrityError:
         await db.rollback()
-        # Unique constraint on `code` field
-        raise EventAlreadyExists(payload.event_code) from exc
+        raise EventAlreadyExists(code)
+
     return new_event
 
 

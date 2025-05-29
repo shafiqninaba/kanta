@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, field_validator
+import base64
 
 
 class CreateEventInput(BaseModel):
@@ -95,6 +96,8 @@ class EventInfo(BaseModel):
         end_date_time (Optional[datetime]): End time (UTC).
         created_at (datetime): Event creation time.
         running (bool): Whether the event is currently ongoing.
+        event_image (Optional[str]): Base64-encoded image of the event.
+        qr_code_image (Optional[str]): Base64-encoded QR code image for the event.
     """
 
     code: str
@@ -104,6 +107,19 @@ class EventInfo(BaseModel):
     end_date_time: Optional[datetime]
     created_at: datetime
     running: bool
+
+    # New fields: Base64-encoded strings or URLs
+    event_image: Optional[str] = None
+    qr_code_image: Optional[str] = None
+
+    @field_validator("event_image", "qr_code_image", mode="before")
+    @classmethod
+    def _bytes_to_data_uri(cls, v, info):
+        if isinstance(v, (bytes, bytearray)):
+            mime = "image/png" if info.field_name == "qr_code_image" else "image/jpeg"
+            b64 = base64.b64encode(v).decode("ascii")
+            return f"data:{mime};base64,{b64}"
+        return v
 
     class Config:
         from_attributes = True

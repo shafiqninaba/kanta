@@ -2,7 +2,7 @@
 SQLAlchemy declarative models for events, images, and faces
 """
 
-from sqlalchemy import Column, DateTime, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import relationship
 
 from ..db.base import Base
@@ -38,6 +38,10 @@ class Event(Base):
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    # New columns: binary blobs
+    event_image = Column(LargeBinary, nullable=True)
+    qr_code_image = Column(LargeBinary, nullable=True)
 
     images = relationship(
         "Image", back_populates="event", cascade="all, delete-orphan", lazy="selectin"
