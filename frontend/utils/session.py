@@ -15,7 +15,7 @@ def init_session_state():
 def get_event_selection():
     """Common event selection widget for sidebar"""
     st.sidebar.title("Kanta")
-    st.sidebar.subheader("Collaborative Film Camera for Events")
+    st.sidebar.subheader("Collaborative Event Photos")
 
     # Event selection
     available_events = get_events()

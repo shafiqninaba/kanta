@@ -15,7 +15,7 @@ def render_step(step: dict) -> None:
         step (dict): A dictionary containing the step details.
             Expected keys: title, description, page, link_label, icon, image_src, caption
     """
-    col_img, col_txt = st.columns([2, 3])
+    col_img, col_txt = st.columns([3, 3])
     with col_img:
         st.image(
             step["image_src"],
