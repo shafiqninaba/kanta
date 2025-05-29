@@ -134,6 +134,7 @@ async def create_event_endpoint(
 async def update_event_endpoint(
     payload: UpdateEventInput,
     db: AsyncSession = Depends(get_db),
+    blob_service: BlobServiceClient = Depends(get_blob_service),
 ) -> EventInfo:
     """
     Update fields of an existing event identified by its code.
@@ -149,7 +150,7 @@ async def update_event_endpoint(
         HTTPException 404: If no event with the given code is found.
     """
     try:
-        event = await update_event(db, payload)
+        event = await update_event(db, payload, blob_service)
     except EventNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

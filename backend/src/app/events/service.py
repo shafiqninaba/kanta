@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 
 from .exceptions import EventAlreadyExists, EventNotFound
 from .models import Event
@@ -113,48 +114,83 @@ async def create_event(
 # --------------------------------------------------------------------
 # UPDATE EVENT
 # --------------------------------------------------------------------
-async def update_event(db: AsyncSession, payload: UpdateEventInput) -> Event:
+async def update_event(
+    db: AsyncSession,
+    payload: UpdateEventInput,
+    blob_service: BlobServiceClient,
+) -> Event:
     """
-    Update fields of an existing Event identified by code.
+    Update an existing Event record with new data.
 
     Args:
         db (AsyncSession): The async database session.
-        payload (UpdateEventInput): Pydantic model containing the code of the event to update,
-            plus any fields (new_event_code, name, description, start_date_time, end_date_time) to change.
+        payload (UpdateEventInput): Pydantic model containing the event code, new code, name,
+            description, start_date_time, and end_date_time.
+        blob_service (BlobServiceClient): Azure Blob Service client for managing event containers.
 
     Returns:
-        Event: The updated Event ORM instance.
+        Event: The updated Event ORM instance with all fields populated (including id and created_at).
 
     Raises:
         EventNotFound: If no Event with the given code is found.
-        EventAlreadyExists: If trying to update to a code that already exists.
+        EventAlreadyExists: If renaming the event results in a code that already exists.
     """
+    # 1) Fetch or 404
     event = await get_event(db, payload.event_code)
+    old_code = event.code
 
-    # Check if new_event_code already exists (if provided and different from current)
-    if payload.new_event_code is not None and payload.new_event_code != event.code:
+    # 2) If renaming, check uniqueness in DB
+    if payload.new_event_code and payload.new_event_code != old_code:
         stmt = select(Event).where(Event.code == payload.new_event_code)
-        result = await db.execute(stmt)
-        existing_event = result.scalar_one_or_none()
-        if existing_event:
+        res = await db.execute(stmt)
+        if res.scalar_one_or_none():
             raise EventAlreadyExists(payload.new_event_code)
         event.code = payload.new_event_code
 
-    if payload.name is not None:
-        event.name = payload.name
-    if payload.description is not None:
-        event.description = payload.description
-    if payload.start_date_time is not None:
-        event.start_date_time = payload.start_date_time
-    if payload.end_date_time is not None:
-        event.end_date_time = payload.end_date_time
+    # 3) Apply other fields
+    for field in ("name", "description", "start_date_time", "end_date_time"):
+        val = getattr(payload, field)
+        if val is not None:
+            setattr(event, field, val)
 
+    # 4) Commit DB
     try:
         await db.commit()
         await db.refresh(event)
     except IntegrityError as exc:
         await db.rollback()
-        raise EventAlreadyExists(payload.new_event_code or event.code) from exc
+        raise EventAlreadyExists(payload.new_event_code or old_code) from exc
+
+    # 5) Rename container in Azure if code changed
+    if payload.new_event_code and payload.new_event_code != old_code:
+        old_container = old_code.lower()
+        new_container = payload.new_event_code.lower()
+
+        # 5a) Create the new container
+        try:
+            blob_service.create_container(new_container, public_access="blob")
+        except ResourceExistsError:
+            pass
+
+        # 5b) Copy each blob from old → new
+        old_client = blob_service.get_container_client(old_container)
+        new_client = blob_service.get_container_client(new_container)
+        for blob in old_client.list_blobs():
+            src = old_client.get_blob_client(blob.name)
+            dest = new_client.get_blob_client(blob.name)
+            # start copy; URL is source blob URL with SAS or public if anonymous
+            dest.start_copy_from_url(src.url)
+
+        # 5c) Delete the old container
+        try:
+            blob_service.delete_container(old_container)
+        except ResourceNotFoundError:
+            pass
+
+    # RIP: just realised that database images azure blob URL is NOT HANDLED...same for faces
+    # In practice, this means that if you change the event code,
+    # the image URLs will not automatically update.
+    # FOR NOW, WE LET THE EVENT CODE BE PERMANENT.
 
     return event
 
