@@ -110,15 +110,13 @@ with st.expander(
                     progress_bar.progress(i / num_to_upload, text=upload_status_text)
 
                     # upload_image function should handle the UploadedFile object directly
-                    result_message, was_successful = upload_image(
-                        ss.event_code, file_to_upload
-                    )
+                    response = upload_image(ss.event_code, file_to_upload)
 
-                    if was_successful:
+                    if response:
                         successful_uploads += 1
                     else:
                         failed_upload_details.append(
-                            f"'{file_to_upload.name}': {result_message}"
+                            f"'{file_to_upload.name}': {response}"
                         )
                 except Exception as e:
                     failed_upload_details.append(
@@ -324,11 +322,11 @@ with film_strip_column:
                                 ]
                                 shot_to_upload_buffer.seek(0)
 
-                                result_msg, was_successful = upload_image(
+                                response = upload_image(
                                     ss.event_code, shot_to_upload_buffer
                                 )
 
-                                if was_successful:
+                                if response:
                                     successful_film_uploads += 1
                                     # Move shot from pending to uploaded list
                                     ss.uploaded_camera_shots.insert(
@@ -344,7 +342,7 @@ with film_strip_column:
                                         ]
                                 else:
                                     failed_film_upload_details.append(
-                                        f"Shot (original pos {original_pending_idx+1}): {result_msg}"
+                                        f"Shot (original pos {original_pending_idx+1}): {response}"
                                     )
                             except Exception as e:
                                 failed_film_upload_details.append(

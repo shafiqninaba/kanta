@@ -1,4 +1,5 @@
 import streamlit as st
+from utils.api import get_events
 
 
 def init_session_state():
@@ -12,8 +13,6 @@ def init_session_state():
 
 def get_event_selection():
     """Common event selection widget for sidebar"""
-    from utils.api import get_events
-
     st.sidebar.title("Kanta")
     st.sidebar.subheader("Collaborative Film Camera for Events")
 

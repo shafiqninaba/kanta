@@ -252,8 +252,8 @@ st.markdown("---")
 
 # --- Image Detail Popover Content Function (REVISED - STRICTLY NO st.columns for face items) ---
 def image_detail_popover_content_fn(image_uuid_for_popover: str):
-    details_data, success = get_image_detail(image_uuid_for_popover)
-    if not success or not details_data:
+    details_data = get_image_detail(image_uuid_for_popover)
+    if not details_data:
         st.error(f"Details unavailable: {details_data}")
         return
     image_info = details_data.get("image", {})
@@ -417,61 +417,57 @@ if ss.event_code:
     ):
         api_filter_params["cluster_list_id"] = None
 
-    images_response_data, success = get_images(ss.event_code, **api_filter_params)
+    images_response_data = get_images(ss.event_code, **api_filter_params)
 
-    if success:
-        if not isinstance(images_response_data, list):
-            image_display_placeholder.error(
-                f"API Error: Expected list, got {type(images_response_data)}"
-            )
-            st.stop()
-        fetched_images_list = images_response_data
-        image_display_placeholder.empty()
-        if not fetched_images_list:
-            msg = (
-                "No images found for the selected people and other active filters."
-                if ss.get("gallery_filter_cluster_list")
-                else "No images found for the current filters."
-            )
-            st.info(msg)
-        else:
-            st.write(f"Displaying {len(fetched_images_list)} image(s).")
-            grid_cols = st.columns(NUM_IMAGE_GRID_COLS)
-            for i, img_meta in enumerate(fetched_images_list):
-                with grid_cols[i % NUM_IMAGE_GRID_COLS]:
-                    with st.container():
-                        st.markdown(
-                            f"""<div class="image-grid-cell" title="Faces: {img_meta['faces']}"> 
-                                        <img src="{img_meta['azure_blob_url']}" class="grid-thumbnail-image" alt="Image {img_meta['uuid'][:8]}">
-                                    </div>""",
-                            unsafe_allow_html=True,
-                        )
-                        controls_cols = st.columns([0.7, 0.3])
-                        with controls_cols[0]:
-                            with st.popover(
-                                "View Photo",
-                                use_container_width=True,
-                                help=f"View full photo and details for {img_meta['uuid'][:8]}",
-                            ):
-                                image_detail_popover_content_fn(img_meta["uuid"])
-                        with controls_cols[1]:
-                            is_selected_download = st.checkbox(
-                                "",
-                                value=(img_meta["uuid"] in ss.gallery_selected_images),
-                                key=f"gallery_select_img_{img_meta['uuid']}",
-                                label_visibility="collapsed",
-                                help="Select for download",
-                            )
-                            if is_selected_download:
-                                ss.gallery_selected_images[img_meta["uuid"]] = img_meta[
-                                    "azure_blob_url"
-                                ]
-                            elif img_meta["uuid"] in ss.gallery_selected_images:
-                                del ss.gallery_selected_images[img_meta["uuid"]]
-    else:
+    if not isinstance(images_response_data, list):
         image_display_placeholder.error(
-            f"Failed to load images: {images_response_data}"
+            f"API Error: Expected list, got {type(images_response_data)}"
         )
+        st.stop()
+
+    fetched_images_list = images_response_data
+    image_display_placeholder.empty()
+    if not fetched_images_list:
+        msg = (
+            "No images found for the selected people and other active filters."
+            if ss.get("gallery_filter_cluster_list")
+            else "No images found for the current filters."
+        )
+        st.info(msg)
+    else:
+        st.write(f"Displaying {len(fetched_images_list)} image(s).")
+        grid_cols = st.columns(NUM_IMAGE_GRID_COLS)
+        for i, img_meta in enumerate(fetched_images_list):
+            with grid_cols[i % NUM_IMAGE_GRID_COLS]:
+                with st.container():
+                    st.markdown(
+                        f"""<div class="image-grid-cell" title="Faces: {img_meta['faces']}"> 
+                                    <img src="{img_meta['azure_blob_url']}" class="grid-thumbnail-image" alt="Image {img_meta['uuid'][:8]}">
+                                </div>""",
+                        unsafe_allow_html=True,
+                    )
+                    controls_cols = st.columns([0.7, 0.3])
+                    with controls_cols[0]:
+                        with st.popover(
+                            "View Photo",
+                            use_container_width=True,
+                            help=f"View full photo and details for {img_meta['uuid'][:8]}",
+                        ):
+                            image_detail_popover_content_fn(img_meta["uuid"])
+                    with controls_cols[1]:
+                        is_selected_download = st.checkbox(
+                            "",
+                            value=(img_meta["uuid"] in ss.gallery_selected_images),
+                            key=f"gallery_select_img_{img_meta['uuid']}",
+                            label_visibility="collapsed",
+                            help="Select for download",
+                        )
+                        if is_selected_download:
+                            ss.gallery_selected_images[img_meta["uuid"]] = img_meta[
+                                "azure_blob_url"
+                            ]
+                        elif img_meta["uuid"] in ss.gallery_selected_images:
+                            del ss.gallery_selected_images[img_meta["uuid"]]
 
 # --- Custom CSS ---
 st.markdown(

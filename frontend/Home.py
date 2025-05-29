@@ -9,10 +9,15 @@ st.set_page_config(
 
 
 def render_step(step: dict):
-    """Render one instruction step with fixed-size image + text in two columns."""
+    """Render one instruction step with fixed-size image + text in two columns.
+
+    Args:
+        step (dict): A dictionary containing the step details.
+            Expected keys: title, description, page, link_label, icon, image_src, caption
+    """
     col_img, col_txt = st.columns([2, 3])
+    # Image with forced width and height
     with col_img:
-        # Image with forced width and height
         st.image(
             step["image_src"],
             width=300,
@@ -20,6 +25,7 @@ def render_step(step: dict):
             use_container_width=False,
             caption=step["caption"],
         )
+    # Text with title, description, and link to the page
     with col_txt:
         st.subheader(step["title"])
         st.write(step["description"])

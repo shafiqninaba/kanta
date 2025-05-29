@@ -8,7 +8,7 @@ import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
 # Ensure get_clusters and the new find_similar_faces_api are imported
-from utils.api import find_similar_faces_api, get_clusters
+from utils.api import find_similar_faces, get_clusters
 from utils.image_helpers import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
@@ -76,9 +76,9 @@ with tab_identified:
     with st.spinner(
         f"Loading identified people with {ss.people_sample_size} samples each..."
     ):
-        all_clusters_data, success = get_clusters(ss.event_code, ss.people_sample_size)
+        all_clusters_data = get_clusters(ss.event_code, ss.people_sample_size)
 
-    if not success:
+    if not all_clusters_data:
         st.error(f"Failed to load identified people data: {all_clusters_data}")
     elif not all_clusters_data:
         st.info(
@@ -341,23 +341,19 @@ with tab_similarity:
             filename = uploaded_file.name
 
             with st.spinner("Searching for similar faces... This might take a moment."):
-                results, success, error_msg = find_similar_faces_api(
+                results = find_similar_faces(
                     event_code=ss.event_code,
                     image_file_bytes=image_bytes,
                     image_filename=filename,
                     metric=ss.similarity_metric,
                     top_k=ss.similarity_top_k,
                 )
-            if success:
                 if results:
                     st.success(f"Found {len(results)} similar faces.")
                     ss.similarity_results = results
                 else:
                     st.info("No similar faces found matching the criteria.")
                     ss.similarity_results = []  # Empty list means search was successful but no results
-            else:
-                st.error(f"Similarity search failed: {error_msg}")
-                ss.similarity_results = None  # Error state
         else:
             st.warning("Please upload an image first.")
 
