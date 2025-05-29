@@ -33,9 +33,7 @@ def get_event_selection():
     )
 
     # Manual event code entry (for testing or if get_events fails)
-    manual_event = st.sidebar.text_input(
-        "Or enter event code manually:", value=st.session_state.event_code
-    )
+    manual_event = st.sidebar.text_input("Or enter event code manually:")
 
     # Update event code in session state
     if selected_event:
@@ -47,6 +45,6 @@ def get_event_selection():
     if st.session_state.event_code:
         st.sidebar.success(f"Current event: {st.session_state.event_code}")
     else:
-        st.sidebar.error("Please select an event")
+        st.sidebar.warning("Please select an event")
 
     st.sidebar.divider()

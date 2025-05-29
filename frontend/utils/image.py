@@ -73,6 +73,20 @@ def crop_and_encode_face(
 ) -> Optional[str]:
     """
     Crops a face from image bytes, resizes with padding, and encodes it as base64.
+
+    Args:
+        image_bytes: Raw bytes of the image.
+        bbox: Dictionary with bounding box coordinates:
+            - x: X coordinate of the top-left corner
+            - y: Y coordinate of the top-left corner
+            - width: Width of the bounding box
+            - height: Height of the bounding box
+        target_size: Tuple (width, height) for the final image size.
+        pad_x_ratio: Padding ratio for width (default 0.3).
+        pad_y_ratio: Padding ratio for height (default 0.3).
+
+    Returns:
+        Base64-encoded string of the cropped and resized face image, or None on failure.
     """
     try:
         # --- THIS IS THE CRITICAL CHANGE ---
