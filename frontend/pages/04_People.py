@@ -244,7 +244,7 @@ with tab_people:
         # Processing indicator (remains the same)
         if processing and processing.get("face_count", 0) > 0:
             st.info(
-                f"⚙️ Still processing approximately {processing['face_count']} new faces. Check back later for more updates."
+                f"Still processing approximately {processing['face_count']} new faces. Check back later for more updates."
             )
 
 
