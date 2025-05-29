@@ -51,7 +51,7 @@ ss.setdefault("similarity_query_b64", None)
 # --------------------------------------------------------------------
 # Title and Event Validation
 # --------------------------------------------------------------------
-st.title("🧑‍🤝‍🧑 People & Similarity Search")
+st.title("People")
 if not ss.get("event_code"):
     st.warning("👈 Select an event from the sidebar first.")
     st.stop()
@@ -59,16 +59,14 @@ if not ss.get("event_code"):
 # --------------------------------------------------------------------
 # Tabs
 # --------------------------------------------------------------------
-tab_people, tab_similarity = st.tabs(["👥 Identified People", "🔍 Find Similar Faces"])
+tab_people, tab_similarity = st.tabs(["Identified People", "Face Similarity Search"])
 
-## =================================
+# =================================
 # TAB 1: IDENTIFIED PEOPLE
 # =================================
 with tab_people:
     st.markdown("#### Select Individuals")
-    st.caption(
-        "Select individuals below to filter the image gallery by person. Faces will cycle every few seconds."
-    )
+    st.caption("Select individuals below to filter the image gallery by person.")
 
     new_size = st.slider(
         "Sample faces per person",
@@ -103,15 +101,14 @@ with tab_people:
             st.info("No identified people to display.")
         else:
             st.markdown(f"Found **{len(persons)}** distinct people.")
-            # No st.markdown("---") here, spacing will be handled by item containers
 
-            grid_layout_cols = st.columns(PERSON_DISPLAY_COLS, gap="medium")
+            grid_layout_cols = st.columns(
+                PERSON_DISPLAY_COLS, gap="large"
+            )  # Increased gap for more visual separation
 
             for idx, person_cluster_info in enumerate(persons):
                 with grid_layout_cols[idx % PERSON_DISPLAY_COLS]:
-                    # Use a container for each person "card" to group elements
-                    # This container itself will not have visible borders unless styled.
-                    with st.container():  # Removed border argument from st.container
+                    with st.container():  # Main container for each person item in the grid cell
                         cid = person_cluster_info["cluster_id"]
                         face_count = person_cluster_info.get("face_count", 0)
                         samples = person_cluster_info.get("samples", [])
@@ -138,7 +135,7 @@ with tab_people:
                         )
                         js_img_id = f"person_img_{cid}_{idx}"
 
-                        # 1. Image (centered using markdown and custom HTML for the image itself)
+                        # 1. Image (centered)
                         st.markdown(
                             f"""
                             <div style='display:flex; justify-content:center; margin-bottom:8px;'>
@@ -163,42 +160,43 @@ with tab_people:
                             unsafe_allow_html=True,
                         )
 
-                        # 2. Text and Checkbox side-by-side using st.columns within the container
-                        text_col, check_col = st.columns([0.8, 0.2], gap="small")
-                        # Adjust ratios as needed for alignment. gap="small" or "none"
+                        # 2. Text "Person X (Y items)" (centered)
+                        st.markdown(
+                            f"""
+                            <div style='text-align:center; margin-bottom:5px;'>
+                                <p style='margin:0; font-size:1.0em; white-space:nowrap;'>
+                                    Person {cid} 
+                                    <span style='font-size:0.85em; color:grey;'>({face_count} photos)</span>
+                                </p>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
 
-                        with text_col:
-                            # Center text or align left as preferred.
-                            # For left alignment and vertical centering:
-                            st.markdown(
-                                f"""
-                                <div style='display:flex; align-items:center; height:38px; justify-content:center;'> 
-                                    <p style='margin:0; font-size:1.0em; text-align:center; white-space:nowrap;'>
-                                        Person {cid} 
-                                        <span style='font-size:0.85em; color:grey;'>({face_count})</span>
-                                    </p>
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
+                        # 3. Checkbox (Streamlit will try to center it within its allocated space)
+                        # To ensure it's truly centered within this person item's visual block,
+                        # we can wrap it in a div with text-align:center, though st.checkbox might do this.
 
-                        with check_col:
-                            # Attempt to center the checkbox. Streamlit centers its own widget containers.
-                            # We can wrap it in markdown to try and influence, but it's tricky.
-                            # For now, just the checkbox.
+                        # Create a small, centered column for the checkbox
+                        # This gives more control over its horizontal position
+                        # We use a list comprehension for columns for dynamic width if needed, but here just one.
+                        check_cols = st.columns(
+                            [1, 0.3, 1]
+                        )  # Left_spacer, Checkbox, Right_spacer
+                        with check_cols[1]:  # Place checkbox in the middle small column
                             checkbox_key = f"select_person_cb_{cid}_{idx}"
                             selected = st.checkbox(
-                                "",
+                                "",  # No label, text is above
                                 value=ss.people_selected_clusters.get(cid, False),
                                 key=checkbox_key,
                                 label_visibility="collapsed",
-                                help=f"Select Person {cid}",
+                                help=f"Select Person {cid} to filter images in the gallery",
                             )
                             ss.people_selected_clusters[cid] = selected
 
                         # Add vertical space after each person item within its grid cell
                         st.markdown(
-                            "<div style='height: 20px;'></div>", unsafe_allow_html=True
+                            "<div style='height: 15px;'></div>", unsafe_allow_html=True
                         )
 
             st.markdown("---")
@@ -206,7 +204,7 @@ with tab_people:
             if st.button(
                 f"🖼️ View Gallery for {len(sel_ids)} Selected People"
                 if sel_ids
-                else "🖼️ Select People to View in Gallery",
+                else "Browse pictures of selected people in Gallery",
                 key="view_selected_people_gallery",
                 disabled=not sel_ids,
                 type="primary",
@@ -220,7 +218,7 @@ with tab_people:
                 ss.gallery_max_faces = 0
                 st.switch_page("pages/03_Gallery.py")
 
-        # Unassigned faces section
+        # Unassigned faces section (remains the same)
         if unassigned and unassigned.get("face_count", 0) > 0:
             st.markdown("---")
             st.subheader(f"❓ Unidentified Faces ({unassigned['face_count']})")
@@ -252,17 +250,16 @@ with tab_people:
                     else:
                         st.write("Could not load samples for unidentified faces.")
 
-        # Processing indicator
+        # Processing indicator (remains the same)
         if processing and processing.get("face_count", 0) > 0:
             st.info(
                 f"⚙️ Still processing approximately {processing['face_count']} new faces. Check back later for more updates."
             )
 
 # =================================
-# TAB 2: SIMILARITY SEARCH (Python code unchanged from previous correct version)
+# TAB 2: SIMILARITY SEARCH (Unchanged from your last version)
 # =================================
 with tab_similarity:
-    st.header("🔍 Find Similar Faces")
     st.caption(
         "Upload an image or use your camera to find people with similar faces within this event."
     )
@@ -369,8 +366,7 @@ with tab_similarity:
             result_display_cols = st.columns(num_result_cols, gap="medium")
             for idx, result_face_info in enumerate(ss.similarity_results):
                 with result_display_cols[idx % num_result_cols]:
-                    with st.container():  # Use container for each result card for better styling control
-                        # st.markdown(f"<div class='similar-face-card'>", unsafe_allow_html=True) # Can use CSS class on container if needed
+                    with st.container():
                         result_image_stream = fetch_image_bytes_from_url(
                             result_face_info.get("azure_blob_url")
                         )
@@ -382,9 +378,7 @@ with tab_similarity:
                                 SIMILAR_FACE_SIZE,
                             )
                         if b64_result_face_thumb:
-                            st.image(
-                                b64_result_face_thumb, use_container_width=True
-                            )  # Changed to use_container_width
+                            st.image(b64_result_face_thumb, use_container_width=True)
                         else:
                             st.markdown(
                                 f"""
@@ -399,15 +393,13 @@ with tab_similarity:
                         cluster_id_val = result_face_info.get("cluster_id", "N/A")
                         distance_val = result_face_info.get("distance", float("inf"))
                         similarity_score = (
-                            (1 - distance_val) * 100  # Raw score from 0-100
-                            if ss.similarity_metric == "cosine"
-                            and distance_val
-                            <= 1.0  # Ensure distance is valid for cosine
+                            (1 - distance_val) * 100
+                            if ss.similarity_metric == "cosine" and distance_val <= 1.0
                             else (
                                 100 - distance_val
                                 if ss.similarity_metric == "l2" and distance_val >= 0
                                 else distance_val
-                            )  # L2 to %
+                            )
                         )
                         similarity_text = (
                             f"{similarity_score:.1f}%"
@@ -419,40 +411,38 @@ with tab_similarity:
                             f"Person ID: {cluster_id_val}<br>Similarity: {similarity_text}",
                             unsafe_allow_html=True,
                         )
-                        # st.markdown(f"</div>", unsafe_allow_html=True)
 
 # --------------------------------------------------------------------
-# Custom CSS
+# Custom CSS (Unchanged from your last version)
 # --------------------------------------------------------------------
 st.markdown(
     f"""
 <style>
     /* Identified People Tab */
-    /* Ensure Streamlit's default container padding is not too much if using st.container extensively */
-    div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] {{
-        /* This targets the container used for each person item if you use st.container()
-           You might need to inspect element to get the exact selector for your Streamlit version.
-           Adjust padding or margin here if needed.
+    div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] .stContainer {{
+        /* This targets st.container specifically within the main grid columns for people.
+           Adjust if Streamlit's internal structure changes the data-testid nesting.
+           You might want to add a class to st.container if this becomes unreliable.
         */
-        /* padding-bottom: 10px; */ /* Example */
+        /* padding: 5px; */ /* Reduce padding if too much */
+        /* margin-bottom: 10px; /* Overall bottom margin for each person item */
     }}
 
     /* Similarity Search Tab */
-    /* Targeting the container for each similarity result for styling */
-    div[data-testid="stHorizontalBlock"] .stContainer {{ /* More general for containers in horizontal blocks */
+    div[data-testid="stHorizontalBlock"] .stContainer {{ 
         border: 1px solid #e0e0e0;
         border-radius: 8px;
         padding: 10px;
-        margin-bottom: 15px; /* Spacing between cards in a column */
+        margin-bottom: 15px;
         background-color: #fdfdfd;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        display: flex; /* Ensure children are laid out well */
+        display: flex;
         flex-direction: column;
         align-items: center;
     }}
-    div[data-testid="stHorizontalBlock"] .stContainer img {{ /* Target images within these result containers */
+    div[data-testid="stHorizontalBlock"] .stContainer img {{
         border-radius: 6px;
-        object-fit: cover; /* Ensure image covers the area if using fixed size */
+        object-fit: cover;
     }}
     div[data-testid="stHorizontalBlock"] .stContainer .stCaption {{
         text-align: center;

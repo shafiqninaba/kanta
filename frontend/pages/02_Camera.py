@@ -41,7 +41,7 @@ def main() -> None:
     # --------------------------------------------------------------------
     st.markdown(
         """
-### 📷 How it works
+### How it works
 - Use the **film camera** for a limited roll of disposable shots.
 - Separately, you can **upload existing images** from your device directly to the event (no limit).
         """
