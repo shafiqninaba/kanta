@@ -33,7 +33,7 @@ router = APIRouter(prefix="/events", tags=["events"])
     response_model=EventListResponse,
     summary="List events (optionally filter by code & running status)",
 )
-async def list_events(
+async def get_events_endpoint(
     event_code: Optional[str] = Query(
         None,
         pattern=r"^[a-zA-Z0-9_]+$",
@@ -96,6 +96,11 @@ async def create_event_endpoint(
     except IntegrityError as exc:
         raise HTTPException(400, "Event code already exists") from exc
     except EventAlreadyExists as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

@@ -88,14 +88,9 @@ async def create_event(
         end_date_time=end_date_time,
     )
 
-    # If an image was uploaded, read into bytes:
-    if event_image_file:
-        buf = await event_image_file.read()
-        new_event.event_image = buf
-
     # Generate a QR code for your link:
     qr = qrcode.QRCode(box_size=10, border=2)
-    qr.add_data(f"https://your.domain.com/events/{code}")
+    qr.add_data(f"https://your.domain.com/events/{payload.event_code}")
     qr.make(fit=True)
     img = qr.make_image()
     buf = BytesIO()
