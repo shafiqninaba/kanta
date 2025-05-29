@@ -10,7 +10,6 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Union
 
 import streamlit as st
-
 from utils.api import get_image_detail, get_images
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state

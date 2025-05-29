@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Tuple
 
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
-
 from utils.api import find_similar_faces, get_clusters
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state

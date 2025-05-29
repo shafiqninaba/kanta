@@ -1,4 +1,5 @@
 import streamlit as st
+
 from utils.api import get_events
 
 

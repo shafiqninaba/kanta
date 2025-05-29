@@ -1,9 +1,9 @@
-import streamlit as st
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 
+import streamlit as st
 from requests import HTTPError
+from utils.api import create_event, get_events, update_event
 from utils.session import get_event_selection, init_session_state
-from utils.api import get_events, update_event, create_event
 
 # Configure the Streamlit page
 st.set_page_config(page_title="Events 🎭", page_icon="🎭", layout="wide")
