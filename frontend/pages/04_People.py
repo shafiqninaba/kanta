@@ -254,7 +254,7 @@ with tab_similarity:
         "Upload an image or use your camera to find people with similar faces within this event."
     )
 
-    col_query_area, col_results_area = st.columns([1, 2], gap="large")
+    col_query_area, col_results_area = st.columns([2, 1], gap="large")
 
     with col_query_area:
         st.subheader("Provide Query Image")
@@ -403,7 +403,7 @@ with tab_similarity:
                         )
 
 # --------------------------------------------------------------------
-# Custom CSS (Unchanged from your last version)
+# Custom CSS
 # --------------------------------------------------------------------
 st.markdown(
     """

@@ -8,12 +8,12 @@ st.set_page_config(
 )
 
 
-def render_step(step: dict):
+def render_step(step: dict) -> None:
     """Render one instruction step with fixed-size image + text in two columns.
 
     Args:
         step (dict): A dictionary containing the step details.
-            Expected keys: title, description, page, link_label, image_src, caption
+            Expected keys: title, description, page, link_label, icon, image_src, caption
     """
     col_img, col_txt = st.columns([2, 3])
     with col_img:
@@ -30,6 +30,7 @@ def render_step(step: dict):
         st.page_link(
             page=step["page"],
             label=step["link_label"],
+            icon=step["icon"],
             use_container_width=True,
         )
 
@@ -57,7 +58,8 @@ def main():
                 "Set up your event and generate a custom QR code guests can scan to join instantly."
             ),
             "page": "pages/01_Events.py",
-            "link_label": "Create Event >",
+            "link_label": "Manage Events",
+            "icon": "🏠",
             "image_src": "https://cdn.prod.website-files.com/673d196dcbdffd5878aa34c3/67450441a62191954ce549e9_4-creative-qr-code-ideas-to-enhance-your-wedding-experience-wf.webp",
             "caption": "Generate and share your QR code",
         },
@@ -67,7 +69,8 @@ def main():
                 "Scan the event QR code to open Kanta, then capture or upload photos directly from any device."
             ),
             "page": "pages/02_Camera.py",
-            "link_label": "Snap & Upload >",
+            "link_label": "Snap & Upload Photos",
+            "icon": "📷",
             "image_src": "https://images.airtasker.com/v7/https://airtasker-seo-assets-prod.s3.amazonaws.com/en_AU/1715328328533-event-photographers-hero.jpg",
             "caption": "Capture moments live",
         },
@@ -77,7 +80,8 @@ def main():
                 "Browse all event photos in one place, filter by date or person, and mark your favorites."
             ),
             "page": "pages/03_Gallery.py",
-            "link_label": "View Gallery >",
+            "link_label": "View Gallery",
+            "icon": "🖼️",
             "image_src": "https://photos.smugmug.com/BLOG/Blog-images/i-4DzMFWZ/0/NCg78ZfVGwLThZt3BVVJkBNq7VgL2LmzdVTHmXfnd/XL/%40RobHammPhoto%20%236%28c%292017RobertHamm-XL.jpg",
             "caption": "All your photos in one album",
         },
@@ -87,7 +91,8 @@ def main():
                 "Discover auto-detected faces, see every photo of a guest, and relive shared moments."
             ),
             "page": "pages/04_People.py",
-            "link_label": "Discover People >",
+            "link_label": "Discover People",
+            "icon": "👥",
             "image_src": "https://production-rhino-website-crm.s3.ap-southeast-1.amazonaws.com/Face_Recognition_17a30dc38b.png",
             "caption": "Smart face grouping",
         },

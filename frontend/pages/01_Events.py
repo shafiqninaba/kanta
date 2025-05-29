@@ -123,6 +123,8 @@ def main() -> None:
                                 st.rerun()
                             except HTTPError as err:
                                 st.error(f"Update failed: {err}")
+                            except Exception as err:
+                                st.error(f"Unexpected error: {err}")
                     if cancel.form_submit_button("✖️ Cancel"):
                         ss.edit_mode = False
                         st.rerun()
@@ -201,6 +203,8 @@ def main() -> None:
                         st.rerun()
                     except HTTPError as err:
                         st.error(f"Creation failed: {err}")
+                    except Exception as err:
+                        st.error(f"Unexpected error: {err}")
 
 
 if __name__ == "__main__":

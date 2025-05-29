@@ -44,9 +44,7 @@ ss.setdefault("gallery_download_mime", None)
 ss.setdefault("gallery_filter_clusters", None)
 ss.setdefault("gallery_face_selections", {})
 
-# --------------------------------------------------------------------
-# Page Title and Cluster Filter Notice
-# --------------------------------------------------------------------
+# Page Title
 st.title("Image Gallery")
 active_clusters = ss.gallery_filter_clusters
 if active_clusters:
@@ -59,7 +57,7 @@ if not ss.get("event_code"):
     st.stop()
 
 # --------------------------------------------------------------------
-# Filter Bar
+# Filter Bar: Date, Face Count, Pagination, and Actions
 # --------------------------------------------------------------------
 st.markdown("#### Filter Images")
 filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 1.5])  # Renamed to filter_cols

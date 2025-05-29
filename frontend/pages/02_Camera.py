@@ -49,7 +49,7 @@ def main() -> None:
         return
 
     # --------------------------------------------------------------------
-    # Upload Existing Photos
+    # Upload Existing Photos: Allows users to upload images from their device
     # --------------------------------------------------------------------
     with st.expander(
         "Upload existing photos from your device (no shot limit)", expanded=False
@@ -121,7 +121,7 @@ DISPOSABLE CAMERA: {shots_left} SHOT{'S' if shots_left != 1 else ''} REMAINING
     )
 
     # --------------------------------------------------------------------
-    # Camera Input & Filter
+    # Camera Input (with Filters) Component: Allows users to take new shots with filters
     # --------------------------------------------------------------------
     camera_col, film_col = st.columns([2, 3], gap="medium")
     with camera_col:
@@ -163,10 +163,10 @@ DISPOSABLE CAMERA: {shots_left} SHOT{'S' if shots_left != 1 else ''} REMAINING
                     st.error(f"Error processing camera image: {e}")
 
     # --------------------------------------------------------------------
-    # Film Strip & Actions
+    # Film Strip Component: Displays pending and uploaded shots in a film strip format
     # --------------------------------------------------------------------
     with film_col:
-        st.subheader("🎞️ Film Strip (Disposable Camera)")
+        st.subheader("🎞️ Film Strip")
         st.markdown(
             "Your captured shots. Upload or delete pending shots using the buttons below."
         )
@@ -267,7 +267,7 @@ DISPOSABLE CAMERA: {shots_left} SHOT{'S' if shots_left != 1 else ''} REMAINING
                     st.rerun()
 
     # --------------------------------------------------------------------
-    # Page Styles
+    # Custom CSS
     # --------------------------------------------------------------------
     st.markdown(
         """
