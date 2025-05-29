@@ -129,10 +129,12 @@ for var, new in [
         filters_changed = True
 ss.gallery_limit = limit
 ss.gallery_page = page
-if filters_changed and ss.gallery_filter_clusters:
+if (
+    filters_changed and ss.gallery_filter_clusters
+):  # Reset cluster filter if other filters change
     ss.gallery_filter_clusters = None
     ss.gallery_face_selections.clear()
-    ss.gallery_page = 1
+    ss.gallery_page = 1  # Reset to page 1 when filters change
 
 # Prepare API filter parameters
 api_params: Dict[str, Union[str, int, List[int], None]] = {
@@ -201,8 +203,9 @@ st.markdown("---")
 def image_detail_popover(image_uuid: str) -> None:
     """
     Display detailed view and face-selection for a given image UUID.
+    This function is now called conditionally.
     """
-    details = get_image_detail(image_uuid)
+    details = get_image_detail(image_uuid)  # Expensive API call
     if not details:
         st.error("Details unavailable.")
         return
@@ -220,26 +223,42 @@ def image_detail_popover(image_uuid: str) -> None:
     st.caption(f"Faces: {len(faces)} | Type: {info.get('file_extension','').upper()}")
 
     if not faces:
-        st.caption("No faces in this image.")
+        st.caption("No faces detected in this image.")
         return
+
+    st.markdown("##### Detected Faces:")  # Changed to markdown for style consistency
 
     stream = fetch_image_bytes_from_url(info.get("azure_blob_url"))
     if not stream:
         st.error("Cannot load image for face cropping.")
+        # Display faces info even if cropping fails
+        for idx, face_info in enumerate(faces):
+            cid = face_info.get("cluster_id")
+            status_text = (
+                f"Face {idx+1}: Person {cid}"
+                if cid not in [CLUSTER_ID_UNASSIGNED, CLUSTER_ID_PROCESSING]
+                else f"Face {idx+1}: Unidentified/Processing"
+            )
+            st.text(status_text)
+            if idx < len(faces) - 1:
+                st.markdown("---")
         return
 
     selections = ss.gallery_face_selections.setdefault(image_uuid, {})
     valid_clusters: List[int] = []
 
+    # REMOVED st.columns here to prevent nesting error.
+    # Faces will be displayed sequentially (vertically).
     for idx, face in enumerate(faces):
         bbox = face.get("bbox", {})
         cid = face.get("cluster_id")
-        fid = face.get("uuid", f"face_{idx}")
+        fid = face.get("uuid", f"face_{idx}")  # Use actual face UUID if available
 
         # Face thumbnail
-        if all(k in bbox for k in ("x", "y", "width", "height")):
-            buf = BytesIO(stream.getvalue())
-            b64 = crop_and_encode_face(buf, bbox, (60, 60), 0.15, 0.15)
+        if all(k in bbox for k in ("x", "y", "width", "height")) and stream:
+            # Create a new BytesIO for each crop to avoid issues with stream position
+            face_stream_copy = BytesIO(stream.getvalue())
+            b64 = crop_and_encode_face(face_stream_copy, bbox, (60, 60), 0.15, 0.15)
             if b64:
                 st.markdown(
                     f"<div class='popover-face-image'><img src='{b64}'></div>",
@@ -247,17 +266,17 @@ def image_detail_popover(image_uuid: str) -> None:
                 )
             else:
                 st.markdown(
-                    "<div class='popover-face-placeholder'>Face</div>",
+                    "<div class='popover-face-placeholder'>Face (crop failed)</div>",
                     unsafe_allow_html=True,
                 )
         else:
             st.markdown(
-                "<div class='popover-face-placeholder'>Face</div>",
+                "<div class='popover-face-placeholder'>Face (no bbox/stream)</div>",
                 unsafe_allow_html=True,
             )
 
-        # Selection or status indicator
-        key = f"filter_btn_popover_{image_uuid}_{fid}_{idx}"
+        # Selection or status indicator (displayed below the thumbnail)
+        key = f"filter_btn_popover_{image_uuid}_{fid}_{idx}"  # Ensure unique key
         if cid in (CLUSTER_ID_UNASSIGNED, CLUSTER_ID_PROCESSING):
             text = "Unidentified" if cid == CLUSTER_ID_UNASSIGNED else "Processing"
             st.markdown(
@@ -274,7 +293,9 @@ def image_detail_popover(image_uuid: str) -> None:
                 valid_clusters.append(cid)
 
         if idx < len(faces) - 1:
-            st.markdown("---")
+            st.markdown("---")  # Separator between face entries
+
+    st.markdown("---")  # Separator before the filter button
 
     unique_clusters = sorted(set(valid_clusters))
     if st.button(
@@ -286,8 +307,14 @@ def image_detail_popover(image_uuid: str) -> None:
     ):
         ss.gallery_filter_clusters = unique_clusters
         ss.gallery_page = 1
-        ss.gallery_date_from = ss.gallery_date_to = None
-        ss.gallery_min_faces = ss.gallery_max_faces = 0
+        # Reset other filters when applying person filter from popover
+        ss.gallery_date_from = None
+        ss.gallery_date_to = None
+        ss.gallery_min_faces = 0
+        ss.gallery_max_faces = 0
+        # Optionally, reset the specific popover's "requested" state
+        # popover_content_requested_key = f"gallery_popover_content_requested_{image_uuid}"
+        # ss[popover_content_requested_key] = False # This would require re-clicking "Load Details"
         st.rerun()
 
 
@@ -308,23 +335,48 @@ if not images:
     st.info(msg)
 else:
     st.write(f"Displaying {len(images)} image(s).")
-    cols = st.columns(NUM_GRID_COLS)
+    grid_cols = st.columns(
+        NUM_GRID_COLS
+    )  # Renamed to avoid conflict if 'cols' is used elsewhere
 
     for idx, img in enumerate(images):
-        with cols[idx % NUM_GRID_COLS]:
+        with grid_cols[idx % NUM_GRID_COLS]:
+            face_count_for_title = img.get("faces", img.get("faces_count", "N/A"))
             st.markdown(
                 f"""
-<div class='image-grid-cell' title='Faces: {img['faces']}'>
+<div class='image-grid-cell' title='Faces: {face_count_for_title}'>
   <img src='{img['azure_blob_url']}' class='grid-thumbnail-image'>
 </div>
 """,
                 unsafe_allow_html=True,
             )
-            ctrl = st.columns([0.7, 0.3])
-            with ctrl[0]:
+            ctrl_cols = st.columns([0.7, 0.3])  # Renamed to avoid conflict
+            with ctrl_cols[0]:
+                popover_content_requested_key = (
+                    f"gallery_popover_content_requested_{img['uuid']}"
+                )
+                ss.setdefault(popover_content_requested_key, False)
+
                 with st.popover("View Photo", use_container_width=True):
-                    image_detail_popover(img["uuid"])
-            with ctrl[1]:
+                    if ss[popover_content_requested_key]:
+                        image_detail_popover(img["uuid"])
+                        if st.button(
+                            "Hide Details",
+                            key=f"hide_details_popover_{img['uuid']}",
+                            use_container_width=True,
+                        ):
+                            ss[popover_content_requested_key] = False
+                            st.rerun()
+                    else:
+                        if st.button(
+                            "Load Photo Details",
+                            key=f"load_details_popover_{img['uuid']}",
+                            type="primary",
+                            use_container_width=True,
+                        ):
+                            ss[popover_content_requested_key] = True
+                            st.rerun()
+            with ctrl_cols[1]:
                 sel_key = f"gallery_select_{img['uuid']}"
                 sel = img["uuid"] in ss.gallery_selected_images
                 new = st.checkbox(
@@ -333,7 +385,9 @@ else:
                 if new:
                     ss.gallery_selected_images[img["uuid"]] = img["azure_blob_url"]
                 elif sel:
-                    del ss.gallery_selected_images[img["uuid"]]
+                    if img["uuid"] in ss.gallery_selected_images:
+                        del ss.gallery_selected_images[img["uuid"]]
+
 
 # --------------------------------------------------------------------
 # Custom CSS
@@ -341,11 +395,59 @@ else:
 st.markdown(
     f"""
 <style>
-.image-grid-cell {{ width:100%; padding-top: {THUMBNAIL_ASPECT_PADDING}; position:relative; border-radius:6px; background:#f0f2f6; box-shadow:0 1px 3px rgba(0,0,0,0.08); overflow:hidden; margin-bottom:5px; }}
-.grid-thumbnail-image {{ position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; }}
-.popover-face-image img {{ border-radius:50%; width:60px; height:60px; }}
-.popover-face-placeholder {{ border:1px solid #ccc; border-radius:50%; width:60px; height:60px; background:#e0e0e0; display:flex; align-items:center; justify-content:center; color:#555; font-size:0.8em; }}
-.popover-face-status {{ text-align:center; font-size:0.85em; color:#6c757d; margin-bottom:5px; }}
+.image-grid-cell {{ 
+    width:100%; 
+    padding-top: {THUMBNAIL_ASPECT_PADDING}; 
+    position:relative; 
+    border-radius:6px; 
+    background:#f0f2f6; 
+    box-shadow:0 1px 3px rgba(0,0,0,0.08); 
+    overflow:hidden; 
+    margin-bottom:5px; 
+}}
+.grid-thumbnail-image {{ 
+    position:absolute; 
+    top:0; 
+    left:0; 
+    width:100%; 
+    height:100%; 
+    object-fit:contain; 
+}}
+.popover-face-image {{ 
+    display: flex; 
+    justify-content: center; 
+    align-items: center; 
+    margin-bottom: 5px;
+}}
+.popover-face-image img {{ 
+    border-radius:50%; 
+    width:60px; 
+    height:60px; 
+    object-fit: cover;
+}}
+.popover-face-placeholder {{ 
+    border:1px solid #ccc; 
+    border-radius:50%; 
+    width:60px; 
+    height:60px; 
+    background:#e0e0e0; 
+    display:flex; 
+    align-items:center; 
+    justify-content:center; 
+    color:#555; 
+    font-size:0.8em; 
+    margin: 0 auto 5px auto; /* Center placeholder */
+}}
+.popover-face-status {{ 
+    text-align:center; 
+    font-size:0.85em; 
+    color:#6c757d; 
+    margin-bottom:10px; /* Added some margin below status */
+}}
+/* Ensure popover content has some padding if needed, Streamlit usually handles this well */
+div[data-testid="stPopoverContent"] > div {{
+    padding: 0.75rem; /* Slightly reduced padding for denser info */
+}}
 </style>
 """,
     unsafe_allow_html=True,
