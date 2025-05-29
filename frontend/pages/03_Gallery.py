@@ -209,7 +209,7 @@ def image_detail_popover(image_uuid: str) -> None:
     info = details.get("image", {})
     faces = details.get("faces", [])
 
-    st.image(info.get("azure_blob_url"), use_column_width=True)
+    st.image(info.get("azure_blob_url"), use_container_width=True)
     created = info.get("created_at")
     if created:
         try:

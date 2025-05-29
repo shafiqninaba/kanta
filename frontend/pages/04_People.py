@@ -258,7 +258,7 @@ with tab_similarity:
                 st.image(
                     f"data:image/png;base64,{q_b64}",
                     caption="Query Image",
-                    use_column_width=True,
+                    use_container_width=True,
                 )
         with col_r:
             if ss.similarity_results is None:
