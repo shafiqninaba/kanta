@@ -46,6 +46,7 @@ class UpdateEventInput(BaseModel):
 
     Attributes:
         event_code (str): Unique code of the event to update.
+        new_event_code (Optional[str]): New unique code for the event.
         name (Optional[str]): New name for the event.
         description (Optional[str]): New description for the event.
         start_date_time (Optional[datetime]): Updated start timestamp.
@@ -53,6 +54,11 @@ class UpdateEventInput(BaseModel):
     """
 
     event_code: str = Field(..., description="Unique code of the event to update.")
+    new_event_code: Optional[str] = Field(
+        None,
+        example="new_shirashafiq26",
+        description="New unique code for the event (if changing).",
+    )
     name: Optional[str] = Field(None, example="Updated Wedding Name")
     description: Optional[str] = Field(
         None, example="Updated description of the event."

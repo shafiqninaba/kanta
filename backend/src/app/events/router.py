@@ -2,7 +2,16 @@ from datetime import datetime
 from io import BytesIO
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    Path,
+    status,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +29,7 @@ from .service import (
     delete_event,
     get_events,
     update_event,
+    upsert_event_image,
 )
 
 router = APIRouter(prefix="/events", tags=["events"])
@@ -147,6 +157,28 @@ async def update_event_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+    return event
+
+
+@router.put(
+    "/{code}/image",
+    response_model=EventInfo,
+    status_code=status.HTTP_200_OK,
+    summary="Upload or replace an event's image",
+)
+async def upsert_event_image_endpoint(
+    code: str = Path(..., description="Event code whose image to set"),
+    image_file: UploadFile = File(..., description="Image file (jpg/png)"),
+    db: AsyncSession = Depends(get_db),
+) -> EventInfo:
+    """
+    Idempotently attach or overwrite the image for an existing event.
+    Returns 404 if the event code doesn’t exist.
+    """
+    try:
+        event = await upsert_event_image(db, code, image_file)
+    except EventNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     return event
 
 

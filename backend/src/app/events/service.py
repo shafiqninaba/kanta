@@ -118,15 +118,25 @@ async def update_event(db: AsyncSession, payload: UpdateEventInput) -> Event:
     Args:
         db (AsyncSession): The async database session.
         payload (UpdateEventInput): Pydantic model containing the code of the event to update,
-            plus any fields (name, description, start_date_time, end_date_time) to change.
+            plus any fields (new_event_code, name, description, start_date_time, end_date_time) to change.
 
     Returns:
         Event: The updated Event ORM instance.
 
     Raises:
         EventNotFound: If no Event with the given code is found.
+        EventAlreadyExists: If trying to update to a code that already exists.
     """
     event = await get_event(db, payload.event_code)
+
+    # Check if new_event_code already exists (if provided and different from current)
+    if payload.new_event_code is not None and payload.new_event_code != event.code:
+        stmt = select(Event).where(Event.code == payload.new_event_code)
+        result = await db.execute(stmt)
+        existing_event = result.scalar_one_or_none()
+        if existing_event:
+            raise EventAlreadyExists(payload.new_event_code)
+        event.code = payload.new_event_code
 
     if payload.name is not None:
         event.name = payload.name
@@ -136,6 +146,39 @@ async def update_event(db: AsyncSession, payload: UpdateEventInput) -> Event:
         event.start_date_time = payload.start_date_time
     if payload.end_date_time is not None:
         event.end_date_time = payload.end_date_time
+
+    try:
+        await db.commit()
+        await db.refresh(event)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise EventAlreadyExists(payload.new_event_code or event.code) from exc
+
+    return event
+
+
+async def upsert_event_image(
+    db: AsyncSession,
+    code: str,
+    image_file: UploadFile,
+):
+    """
+    Read bytes from image_file, attach them to event.event_image,
+    commit & refresh. Raises EventNotFound if code not found.
+
+    Args:
+        db (AsyncSession): The async database session.
+        code (str): The unique event code to update.
+        image_file (UploadFile): The image file to attach or replace.
+
+    Returns:
+        Event: The updated Event ORM instance with the new image attached.
+    """
+    event = await get_event(db, code)
+
+    # read raw bytes
+    raw = await image_file.read()
+    event.event_image = raw
 
     db.add(event)
     await db.commit()
