@@ -1,22 +1,18 @@
-import base64
-from datetime import datetime
+import os
 from io import BytesIO
 from typing import List, Optional
 
-import os
 import qrcode
+from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient, ContainerClient
 from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from azure.core.exceptions import ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 
 from .exceptions import EventAlreadyExists, EventNotFound
 from .models import Event
 from .schemas import CreateEventInput, UpdateEventInput
-from azure.storage.blob import ContainerClient
 
 
 # --------------------------------------------------------------------

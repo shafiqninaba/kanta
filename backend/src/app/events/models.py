@@ -2,7 +2,7 @@
 SQLAlchemy declarative models for events, images, and faces
 """
 
-from sqlalchemy import Column, DateTime, Integer, LargeBinary, String, Text, func
+from sqlalchemy import Column, DateTime, Integer, String, Text, func
 from sqlalchemy.orm import relationship
 
 from ..db.base import Base

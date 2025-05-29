@@ -5,7 +5,7 @@ from typing import Any, Optional
 from azure.core.exceptions import ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, ContainerClient
-from fastapi import Depends, Query, Path
+from fastapi import Depends, Path
 from loguru import logger
 
 from .config import get_settings

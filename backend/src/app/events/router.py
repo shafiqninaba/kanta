@@ -1,7 +1,6 @@
-from datetime import datetime
-from io import BytesIO
 from typing import Optional
 
+from azure.storage.blob import BlobServiceClient, ContainerClient
 from fastapi import (
     APIRouter,
     Depends,
@@ -10,14 +9,10 @@ from fastapi import (
     Path,
     Query,
     UploadFile,
-    Path,
     status,
 )
-from azure.storage.blob import ContainerClient
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from azure.core.exceptions import ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient
+
 from ..core.azure_blob import get_blob_service, get_event_container
 from ..db.base import get_db
 from .exceptions import EventAlreadyExists, EventNotFound
