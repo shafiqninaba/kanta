@@ -19,7 +19,7 @@ from utils.image import (
 from utils.session import get_event_selection, init_session_state
 
 # Page Configuration
-st.set_page_config(page_title="People & Similarity", page_icon="🧑‍🤝‍🧑", layout="wide")
+st.set_page_config(page_title="People", page_icon="👥", layout="wide")
 
 
 # Constants
@@ -36,15 +36,18 @@ get_event_selection()
 ss = st.session_state
 ss.setdefault("people_sample_size", 1)
 ss.setdefault("people_selected_clusters", {})
-ss.setdefault("similarity_top_k", 10)
+ss.setdefault("similarity_top_k", 3)
 ss.setdefault("similarity_metric", "cosine")
 ss.setdefault("similarity_results", None)
 ss.setdefault("similarity_query_b64", None)
 
 
 st.title("People")
+st.markdown(
+    "Browse identified people from the event and search for similar faces using an image or camera."
+)
 if not ss.get("event_code"):
-    st.warning("👈 Select an event from the sidebar first.")
+    st.warning("Please select or create an event first to search for people.")
     st.stop()
 
 # tabs
@@ -54,8 +57,7 @@ tab_people, tab_similarity = st.tabs(["Identified People", "Face Similarity Sear
 # TAB 1: IDENTIFIED PEOPLE
 # --------------------------------------------------------------------
 with tab_people:
-    st.markdown("#### Select Individuals")
-    st.caption("Select individuals below to filter the image gallery by person.")
+    st.caption("_Select individuals below to filter the image gallery by person._")
 
     new_size = st.slider(
         "Sample faces per person",
@@ -191,7 +193,7 @@ with tab_people:
             st.markdown("---")
             sel_ids = [cid for cid, sel in ss.people_selected_clusters.items() if sel]
             if st.button(
-                f"🖼️ View Gallery for {len(sel_ids)} Selected People"
+                f"Browse pictures for {len(sel_ids)} Selected People"
                 if sel_ids
                 else "Browse pictures of selected people in Gallery",
                 key="view_selected_people_gallery",
@@ -251,13 +253,13 @@ with tab_people:
 # --------------------------------------------------------------------
 with tab_similarity:
     st.caption(
-        "Upload an image or use your camera to find people with similar faces within this event."
+        "_Upload an image or use your camera to find people with similar faces within this event._"
     )
 
     col_query_area, col_results_area = st.columns([2, 1], gap="large")
 
     with col_query_area:
-        st.subheader("Provide Query Image")
+        st.subheader("Query Image")
         uploaded_file = st.file_uploader(
             "Upload an image containing a face",
             type=["jpg", "jpeg", "png"],
@@ -287,11 +289,11 @@ with tab_similarity:
                 st.error(f"Could not display query image: {e}")
 
     with col_results_area:
-        st.subheader("Search Controls & Results")
+        st.subheader("Search Settings")
         control_cols = st.columns(2)
         with control_cols[0]:
             ss.similarity_top_k = st.number_input(
-                "Number of results (Top K)",
+                "Top K",
                 min_value=1,
                 max_value=30,
                 value=ss.similarity_top_k,
@@ -308,7 +310,7 @@ with tab_similarity:
             )
 
         if st.button(
-            "🚀 Find Similar Faces",
+            "🔍 Find Similar Faces",
             key="similarity_search_button",
             disabled=(query_image_data is None),
             type="primary",

@@ -35,9 +35,9 @@ def main() -> None:
     ss.setdefault("last_processed_camera_frame", None)
 
     # Instructions
+    st.title("Event Film Cam")
     st.markdown(
         """
-### How it works
 - Use the **film camera** for a limited roll of disposable shots.
 - Separately, you can **upload existing images** from your device directly to the event (no limit).
         """

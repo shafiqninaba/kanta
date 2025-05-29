@@ -6,7 +6,7 @@ from utils.api import create_event, get_events, update_event
 from utils.session import get_event_selection, init_session_state
 
 # Page Configuration
-st.set_page_config(page_title="Events 🎭", page_icon="🎭", layout="wide")
+st.set_page_config(page_title="Events", page_icon="🎭", layout="wide")
 
 
 def main() -> None:
@@ -22,6 +22,9 @@ def main() -> None:
     ss.setdefault("edit_mode", False)
 
     st.title("Events")
+    st.markdown(
+        "Manage your events and create a collaborative photo album for participants."
+    )
     tab_current, tab_create = st.tabs(["Current Event", "Create New Event"])
 
     # --------------------------------------------------------------------

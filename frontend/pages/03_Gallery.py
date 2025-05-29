@@ -45,7 +45,8 @@ ss.setdefault("gallery_filter_clusters", None)
 ss.setdefault("gallery_face_selections", {})
 
 # Page Title
-st.title("Image Gallery")
+st.title("Gallery")
+st.markdown("View, filter, and download images from your event.")
 active_clusters = ss.gallery_filter_clusters
 if active_clusters:
     ids = ", ".join(map(str, sorted(set(active_clusters))))
@@ -53,7 +54,7 @@ if active_clusters:
 
 # Check if an event is selected
 if not ss.get("event_code"):
-    st.warning("👈 Select an event from the sidebar to view images.")
+    st.warning("Please select an event first to view its image gallery.")
     st.stop()
 
 # --------------------------------------------------------------------
