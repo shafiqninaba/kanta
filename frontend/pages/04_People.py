@@ -1,522 +1,310 @@
-# pages/04_People.py (or your chosen filename)
+"""
+People & Similarity Search page for Streamlit application.
+
+Allows browsing identified people, filtering the gallery by person,
+and finding similar faces via upload or camera capture.
+"""
 
 import base64
 import json
+import time
 from io import BytesIO
+from typing import Any, Dict, List, Tuple
 
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
 
-# Ensure get_clusters and the new find_similar_faces_api are imported
 from utils.api import find_similar_faces, get_clusters
-from utils.image_helpers import crop_and_encode_face, fetch_image_bytes_from_url
+from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
-# --- Page Configuration ---
+# Page Configuration
 st.set_page_config(page_title="People & Similarity", page_icon="🧑‍🤝‍🧑", layout="wide")
 
-# --- Initialize Session State & Event Selection ---
-init_session_state()
-# Pass the correct function to fetch events for the sidebar
-
-get_event_selection()
+# --------------------------------------------------------------------
+# Constants
+# --------------------------------------------------------------------
 CLUSTER_ID_UNASSIGNED = -1
 CLUSTER_ID_PROCESSING = -2
+PERSON_CARD_COLS = 4
+SAMPLE_FACE_SIZE: Tuple[int, int] = (150, 150)
+SIMILAR_FACE_SIZE: Tuple[int, int] = (120, 120)
+SWAP_INTERVAL_MS = 20_000
 
-# --- Constants ---
-PERSON_CARD_COLS = 4  # For both identified people and similar faces display
-SAMPLE_FACE_DISPLAY_SIZE = (150, 150)  # For identified people cards
-SIMILAR_FACE_DISPLAY_SIZE = (120, 120)  # Slightly smaller for similarity results
-SWAP_INTERVAL_MS = 20000
-
-# --- Session State for this page ---
+# --------------------------------------------------------------------
+# Session State Initialization
+# --------------------------------------------------------------------
+init_session_state()
+get_event_selection()
 ss = st.session_state
 ss.setdefault("people_sample_size", 1)
 ss.setdefault("people_selected_clusters", {})
 ss.setdefault("similarity_top_k", 10)
 ss.setdefault("similarity_metric", "cosine")
-ss.setdefault("similarity_results", None)  # To store results from API
-ss.setdefault("similarity_query_image_b64", None)  # To display the uploaded query image
+ss.setdefault("similarity_results", None)
+ss.setdefault("similarity_query_b64", None)
 
-# --- Main Application ---
-st.title("People & Similarity Search")
-
-
+# --------------------------------------------------------------------
+# Title and Event Validation
+# --------------------------------------------------------------------
+st.title("🧑‍🤝‍🧑 People & Similarity Search")
 if not ss.get("event_code"):
-    st.warning("👈 Please select an event from the sidebar to use these features.")
+    st.warning("👈 Select an event from the sidebar first.")
     st.stop()
 
-# --- Tabs ---
-tab_identified, tab_similarity = st.tabs(
-    ["👥 Identified People", "🔍 Find Similar Faces"]
-)
+# --------------------------------------------------------------------
+# Tabs
+# --------------------------------------------------------------------
+tab_people, tab_similarity = st.tabs(["👥 Identified People", "🔍 Find Similar Faces"])
 
 # =================================
 # TAB 1: IDENTIFIED PEOPLE
 # =================================
-with tab_identified:
-    st.markdown(
-        "Select individuals from the list below to view images containing them. "
-        "Each circle represents a person, showing sample faces."
-    )
-    new_sample_size = st.slider(
-        "Sample faces per person (Identified People)",
+with tab_people:
+    st.markdown("Select individuals below to filter the gallery by person.")
+
+    # Sample-size slider
+    new_size = st.slider(
+        "Sample faces per person",
         min_value=1,
         max_value=10,
         value=ss.people_sample_size,
-        key="people_sample_size_slider_tab1",  # Unique key
+        key="people_sample_size_slider",
     )
-    if new_sample_size != ss.people_sample_size:
-        ss.people_sample_size = new_sample_size
-        ss.people_selected_clusters = {}  # Reset selection if samples change
+    if new_size != ss.people_sample_size:
+        ss.people_sample_size = new_size
+        ss.people_selected_clusters.clear()
 
     st.markdown("---")
 
-    # Fetch and Process Data for Identified People
-    with st.spinner(
-        f"Loading identified people with {ss.people_sample_size} samples each..."
-    ):
-        all_clusters_data = get_clusters(ss.event_code, ss.people_sample_size)
+    # Fetch clusters
+    with st.spinner(f"Loading {ss.people_sample_size} samples per person..."):
+        clusters = get_clusters(ss.event_code, ss.people_sample_size)
 
-    if not all_clusters_data:
-        st.error(f"Failed to load identified people data: {all_clusters_data}")
-    elif not all_clusters_data:
-        st.info(
-            "No identified people data found for this event, or processing might not be complete."
-        )
+    if not clusters:
+        st.info("No identified people data available.")
     else:
-        processing_info = None
-        unassigned_info = None
-        person_clusters_data = []
-        for cluster in all_clusters_data:
-            cluster_id = cluster.get("cluster_id")
-            if cluster_id == -2:
-                processing_info = cluster
-            elif cluster_id == -1:
-                unassigned_info = cluster
-            elif cluster_id is not None and cluster_id >= 0:
-                person_clusters_data.append(cluster)
+        persons = [c for c in clusters if c.get("cluster_id", -3) >= 0]
+        unassigned = next(
+            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_UNASSIGNED), None
+        )
+        processing = next(
+            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_PROCESSING), None
+        )
 
-        people_display_data = []
-        for person_idx, cluster_info in enumerate(person_clusters_data):
-            cluster_id = cluster_info.get("cluster_id")
-            item_count = cluster_info.get("face_count", 0)
-            samples = cluster_info.get("samples", [])
-            cropped_sample_face_urls = []
-            if samples:
-                for sample_idx, sample in enumerate(samples):
-                    full_image_url = sample.get("sample_blob_url")
-                    bbox = sample.get("sample_bbox")
-                    if full_image_url and isinstance(bbox, dict):
-                        full_image_bytes = fetch_image_bytes_from_url(full_image_url)
-                        if full_image_bytes:
-                            encoded_face = crop_and_encode_face(
-                                full_image_bytes, bbox, SAMPLE_FACE_DISPLAY_SIZE
-                            )
-                            if encoded_face:
-                                cropped_sample_face_urls.append(encoded_face)
-            initial_face_url = (
-                cropped_sample_face_urls[0]
-                if cropped_sample_face_urls
-                else "https://via.placeholder.com/150/CCCCCC/808080?text=No+Sample"
-            )
-            people_display_data.append(
+        # Build display cards
+        cards: List[Dict[str, Any]] = []
+        for idx, cl in enumerate(persons):
+            cid = cl["cluster_id"]
+            count = cl.get("face_count", 0)
+            samples = cl.get("samples", [])
+            urls: List[str] = []
+            for sm in samples:
+                data = fetch_image_bytes_from_url(sm.get("sample_blob_url"))
+                if data:
+                    b64 = crop_and_encode_face(
+                        data, sm.get("sample_bbox", {}), SAMPLE_FACE_SIZE
+                    )
+                    if b64:
+                        urls.append(b64)
+            initial = urls[0] if urls else "https://via.placeholder.com/150"
+            cards.append(
                 {
-                    "original_cluster_id": cluster_id,
-                    "display_id": person_idx,
-                    "item_count": item_count,
-                    "initial_face_url": initial_face_url,
-                    "sample_face_data_urls": cropped_sample_face_urls,
-                    "js_image_id": f"person_img_{cluster_id}_{person_idx}",
+                    "cluster_id": cid,
+                    "count": count,
+                    "urls": urls,
+                    "initial": initial,
+                    "js_id": f"person_{cid}_{idx}",
                 }
             )
 
-        if not person_clusters_data:
-            st.info("No identified people to display for this event yet.")
-        elif not people_display_data and person_clusters_data:
-            st.info(
-                "Identified people found, but no sample faces could be prepared for display."
-            )
+        if not cards:
+            st.info("No identified people to display.")
         else:
-            st.subheader(f"Identified People: {len(people_display_data)}")
-            st.markdown("Select one or more people below to filter the gallery:")
-
-            grid_cols_identified = st.columns(PERSON_CARD_COLS)
-            for i, person_display in enumerate(people_display_data):
-                with grid_cols_identified[i % PERSON_CARD_COLS]:
-                    cluster_id = person_display["original_cluster_id"]
-                    js_image_list = json.dumps(person_display["sample_face_data_urls"])
-                    is_person_selected = st.checkbox(
-                        f"Select Person {person_display['display_id']}",
-                        value=ss.people_selected_clusters.get(cluster_id, False),
-                        key=f"select_person_tab1_{cluster_id}_{i}",  # Unique key
-                        label_visibility="collapsed",
+            cols = st.columns(PERSON_CARD_COLS)
+            for i, card in enumerate(cards):
+                with cols[i % PERSON_CARD_COLS]:
+                    cid = card["cluster_id"]
+                    key = f"select_person_{cid}"
+                    selected = st.checkbox(
+                        f"Person {cid}",
+                        value=ss.people_selected_clusters.get(cid, False),
+                        key=key,
                     )
-                    ss.people_selected_clusters[cluster_id] = is_person_selected
-                    border_style = (
-                        "border: 3px solid #007bff;"
-                        if is_person_selected
-                        else "border: 3px solid #f0f2f6;"
-                    )
-                    person_card_html = f"""
-                    <div class="person-card-visuals" style="{border_style} padding: 5px; border-radius: 8px;"> 
-                        <img id="{person_display['js_image_id']}" src="{person_display['initial_face_url']}" 
-                             class="person-face-circle" alt="Person {person_display['display_id']}" 
-                             title="Person {person_display['display_id']}: {person_display['item_count']} items. Check box above to select.">
-                        <p class="person-label">Person {person_display['display_id']} ({person_display['item_count']})</p>
-                    </div>
-                    <script>
-                        if (!document.getElementById("{person_display['js_image_id']}").dataset.swapperActive) {{
-                            let images_{person_display['js_image_id']} = {js_image_list};
-                            let currentIndex_{person_display['js_image_id']} = 0;
-                            let imgElement_{person_display['js_image_id']} = document.getElementById("{person_display['js_image_id']}");
-                            if (imgElement_{person_display['js_image_id']} && images_{person_display['js_image_id']}.length > 1) {{
-                                setInterval(function() {{
-                                    currentIndex_{person_display['js_image_id']} = (currentIndex_{person_display['js_image_id']} + 1) % images_{person_display['js_image_id']}.length;
-                                    imgElement_{person_display['js_image_id']}.src = images_{person_display['js_image_id']}[currentIndex_{person_display['js_image_id']}];
-                                }}, {SWAP_INTERVAL_MS});
-                                imgElement_{person_display['js_image_id']}.dataset.swapperActive = 'true';
-                            }} else if (imgElement_{person_display['js_image_id']}) {{
-                                imgElement_{person_display['js_image_id']}.dataset.swapperActive = 'true';
-                            }}
-                        }}
-                    </script>"""
-                    st.markdown(person_card_html, unsafe_allow_html=True)
+                    ss.people_selected_clusters[cid] = selected
+                    border = "3px solid #007bff" if selected else "3px solid #f0f2f6"
+                    html = f"""
+<div style='border:{border};border-radius:8px;display:flex;flex-direction:column;align-items:center;padding:8px;'>
+  <img id='{card['js_id']}' src='{card['initial']}' style='width:150px;height:150px;border-radius:50%;margin-bottom:8px;'>
+  <div style='text-align:center;font-size:0.9em;'>Person {cid} ({card['count']})</div>
+</div>
+<script>
+if (!document.getElementById('{card['js_id']}').dataset.swapping) {{
+  let arr = {json.dumps(card['urls'])};
+  let idx=0; let el=document.getElementById('{card['js_id']}');
+  if(arr.length>1) setInterval(()=>{{ idx=(idx+1)%arr.length; el.src=arr[idx]; }}, {SWAP_INTERVAL_MS});
+  el.dataset.swapping='true';
+}}
+</script>"""
+                    st.markdown(html, unsafe_allow_html=True)
 
-            selected_ids_for_button = [
-                cid for cid, sel in ss.people_selected_clusters.items() if sel
-            ]
-            col_btn_left1, col_btn_mid1, col_btn_right1 = st.columns([1, 1.5, 1])
-            with col_btn_mid1:
-                if st.button(
-                    f"🖼️ View Images of Selected ({len(selected_ids_for_button)}) People",
-                    key="view_selected_tab1_btn",
-                    type="primary",
-                    disabled=not selected_ids_for_button,
-                    use_container_width=True,
-                ):
-                    ss.gallery_filter_cluster_list = selected_ids_for_button
-                    ss.gallery_page = 1
-                    ss.gallery_date_from = None
-                    ss.gallery_date_to = None
-                    ss.gallery_min_faces = 0
-                    ss.gallery_max_faces = 0
-                    st.switch_page(
-                        "pages/03_Gallery.py"
-                    )  # Ensure this is your correct gallery page filename
+            sel_ids = [cid for cid, sel in ss.people_selected_clusters.items() if sel]
+            if st.button(
+                f"🖼️ View Images of {len(sel_ids)} People",
+                key="view_selected_people",
+                disabled=not sel_ids,
+                type="primary",
+                use_container_width=True,
+            ):
+                ss.gallery_filter_clusters = sel_ids
+                ss.gallery_page = 1
+                st.switch_page("pages/03_Gallery.py")
+
+        # Unassigned
+        if unassigned and unassigned.get("face_count", 0) > 0:
             st.markdown("---")
-
-    # --- Display Unassigned and Processing Information ---
-    if unassigned_info:
-        count = unassigned_info.get("face_count", 0)
-        samples = unassigned_info.get("samples", [])  # samples is a list
-
-        st.subheader(f"Unidentified People: {count}")
-
-        # Determine expander title
-        if count == 0:
-            exp_title = "No unidentified faces"
-        elif not samples:  # samples is an empty list
-            exp_title = f"{count} unidentified (no samples available)"
-        else:  # samples is a non-empty list
-            exp_title = f"View up to {len(samples)} samples of {count} unidentified"
-
-        # CORRECTED expanded condition:
-        with st.expander(exp_title, expanded=(count > 0 and len(samples) > 0)):
-            if count > 0 and not samples:  # No samples but count > 0
-                st.write(
-                    "Samples for unidentified faces are not available at the moment."
-                )
-            elif count == 0:  # No unidentified faces at all
-                st.write("No unidentified faces found.")
-            # This 'elif not samples:' might be redundant now given the title logic, but safe
-            elif not samples:
-                st.write("No samples to display for unidentified faces.")
-            else:  # We have samples and count > 0
-                unassigned_urls = []
-                for sample_item in samples:  # Renamed 'sample' to 'sample_item' to avoid conflict if 'samples' was used differently
-                    img_url = sample_item.get("sample_blob_url")
-                    bbox = sample_item.get("sample_bbox")
-                    if img_url and isinstance(bbox, dict):  # Ensure bbox is a dict
-                        img_bytes = fetch_image_bytes_from_url(img_url)
-                        if img_bytes:
-                            face_b64 = crop_and_encode_face(img_bytes, bbox, (80, 80))
-                            if face_b64:
-                                unassigned_urls.append(face_b64)
-
-                if unassigned_urls:
-                    cols_per_row_unassigned = min(
-                        8, len(unassigned_urls)
-                    )  # Dynamic columns
-                    if cols_per_row_unassigned > 0:
-                        img_cols_unassigned = st.columns(cols_per_row_unassigned)
-                        for i, url in enumerate(unassigned_urls):
-                            img_cols_unassigned[i % cols_per_row_unassigned].image(
-                                url, width=80
-                            )
+            st.subheader(f"Unidentified: {unassigned['face_count']}")
+            with st.expander("View samples of unidentified faces", expanded=False):
+                urls_un = []
+                for sm in unassigned.get("samples", []):
+                    data = fetch_image_bytes_from_url(sm.get("sample_blob_url"))
+                    if data:
+                        b64 = crop_and_encode_face(
+                            data, sm.get("sample_bbox", {}), (80, 80)
+                        )
+                        if b64:
+                            urls_un.append(b64)
+                if urls_un:
+                    cols_u = st.columns(min(8, len(urls_un)))
+                    for j, u in enumerate(urls_un):
+                        cols_u[j % len(cols_u)].image(u, width=80)
                 else:
-                    st.write("No samples could be processed or displayed.")
-    elif (
-        person_clusters_data
-    ):  # Only show this if identified people existed but no unassigned_info cluster
-        st.subheader("Unidentified People: 0")
-        st.info("No faces are currently marked as unidentified for this event.")
+                    st.write("No samples available.")
 
-    if processing_info:
-        count = processing_info.get("face_count", 0)
-        if count > 0:
-            st.markdown(
-                "---"
-            )  # Add separator if both unassigned and processing are shown
-            st.info(
-                f"⚙️ **{count} faces are currently being processed** and are not yet categorized."
-            )
-
+        # Processing indicator
+        if processing and processing.get("face_count", 0) > 0:
+            st.info(f"⚙️ Processing {processing['face_count']} faces...")
 
 # =================================
 # TAB 2: SIMILARITY SEARCH
 # =================================
 with tab_similarity:
-    st.subheader("Find Similar Faces by Example")
-    st.markdown(
-        "Upload an image containing a single clear face. The system will search for the most similar faces within this event."
-    )
+    st.subheader("🔍 Find Similar Faces")
+    st.markdown("Upload or take a photo to search for similar faces.")
 
-    sim_cols_controls = st.columns([2, 1, 1])
-    with sim_cols_controls[0]:
-        uploaded_file = st.file_uploader(
-            "Upload face image", type=["jpg", "jpeg", "png"], key="similarity_uploader"
+    # Inputs and settings
+    col_input, col_controls = st.columns([1, 1])
+    with col_input:
+        uploaded = st.file_uploader(
+            "Upload face image",
+            type=["jpg", "jpeg", "png"],
+            key="sim_uploader",
+            accept_multiple_files=False,
         )
-    with sim_cols_controls[1]:
+        snapped = st.camera_input("Or take a photo", key="sim_camera")
+        query = uploaded or snapped
+
+    with col_controls:
         ss.similarity_top_k = st.number_input(
-            "Number of results (Top K)",
+            "Top K",
             min_value=1,
             max_value=50,
             value=ss.similarity_top_k,
-            step=1,
-            key="similarity_top_k_input",
+            key="sim_topk",
         )
-    with sim_cols_controls[2]:
         ss.similarity_metric = st.selectbox(
-            "Similarity Metric",
-            options=["cosine", "l2"],
+            "Metric",
+            ["cosine", "l2"],
             index=["cosine", "l2"].index(ss.similarity_metric),
-            key="similarity_metric_select",
+            key="sim_metric",
         )
-
-    if uploaded_file is not None:
-        # Display uploaded image
-        try:
-            pil_image = Image.open(uploaded_file)
-            # Resize for display if too large, maintaining aspect ratio
-            pil_image.thumbnail((300, 300))
-            st.image(
-                pil_image, caption="Your Query Face", width=200
-            )  # Display smaller version
-
-            # Store b64 for potential re-display if results are cleared
-            buffered_display = BytesIO()
-            pil_image.save(buffered_display, format=pil_image.format or "PNG")
-            ss.similarity_query_image_b64 = base64.b64encode(
-                buffered_display.getvalue()
-            ).decode()
-
-        except UnidentifiedImageError:
-            st.error("Could not read the uploaded image. Please try a different file.")
-            uploaded_file = None  # Reset
-            ss.similarity_query_image_b64 = None
-        except Exception as e:
-            st.error(f"Error processing uploaded image: {e}")
-            uploaded_file = None
-            ss.similarity_query_image_b64 = None
-
-    if st.button(
-        "🔍 Find Similar Faces",
-        key="find_similar_btn",
-        type="primary",
-        disabled=uploaded_file is None,
-    ):
-        if uploaded_file:
-            image_bytes = uploaded_file.getvalue()  # Get bytes from UploadedFile object
-            filename = uploaded_file.name
-
-            with st.spinner("Searching for similar faces... This might take a moment."):
-                results = find_similar_faces(
-                    event_code=ss.event_code,
-                    image_file_bytes=image_bytes,
-                    image_filename=filename,
-                    metric=ss.similarity_metric,
-                    top_k=ss.similarity_top_k,
+        search_disabled = query is None
+        if st.button(
+            "🔍 Search",
+            key="sim_search",
+            disabled=search_disabled,
+            type="primary",
+            use_container_width=True,
+        ):
+            with st.spinner("Searching for similar faces..."):
+                results = (
+                    find_similar_faces(
+                        ss.event_code,
+                        query.getvalue(),
+                        query.name if hasattr(query, "name") else "uploaded.jpg",
+                        ss.similarity_metric,
+                        ss.similarity_top_k,
+                    )
+                    or []
                 )
-                if results:
-                    st.success(f"Found {len(results)} similar faces.")
-                    ss.similarity_results = results
-                else:
-                    st.info("No similar faces found matching the criteria.")
-                    ss.similarity_results = []  # Empty list means search was successful but no results
-        else:
-            st.warning("Please upload an image first.")
+                ss.similarity_results = results
 
     st.markdown("---")
 
-    if ss.similarity_results is not None:
-        if not ss.similarity_results:  # Empty list
-            st.info(
-                "No similar faces were found based on your query image and settings."
-            )
-        else:
-            st.subheader(f"Top {len(ss.similarity_results)} Similar Faces Found:")
+    # Display query image and results side-by-side
+    if query:
+        try:
+            img = Image.open(query).convert("RGB")
+            img.thumbnail((200, 200))
+            buf = BytesIO()
+            img.save(buf, format="PNG")
+            buf.seek(0)
+            q_b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            q_b64 = None
 
-            # Prepare display data for similar faces
-            similar_faces_display_data = []
-            for result_face in ss.similarity_results:
-                img_url = result_face.get("azure_blob_url")
-                bbox = result_face.get("bbox")
-                cluster_id_of_similar = result_face.get(
-                    "cluster_id"
-                )  # This is the cluster ID of the *found* similar face
-                distance = result_face.get("distance", -1.0)
-
-                cropped_face_b64 = None
-                if img_url and bbox:
-                    full_image_bytes = fetch_image_bytes_from_url(img_url)
-                    if full_image_bytes:
-                        cropped_face_b64 = crop_and_encode_face(
-                            full_image_bytes, bbox, SIMILAR_FACE_DISPLAY_SIZE
-                        )
-
-                similar_faces_display_data.append(
-                    {
-                        "face_html": cropped_face_b64
-                        if cropped_face_b64
-                        else f"<div class='similar-face-placeholder'>Face (P ID: {cluster_id_of_similar})<br/>Dist: {distance:.3f}</div>",
-                        "is_placeholder": not bool(cropped_face_b64),
-                        "cluster_id": cluster_id_of_similar,
-                        "distance": distance,
-                        "image_uuid": result_face.get(
-                            "image_uuid"
-                        ),  # For potential future use
-                    }
+        col_q, col_r = st.columns([1, 2])
+        with col_q:
+            if q_b64:
+                st.image(
+                    f"data:image/png;base64,{q_b64}",
+                    caption="Query Image",
+                    use_column_width=True,
                 )
-
-            grid_cols_similar = st.columns(
-                PERSON_CARD_COLS
-            )  # Reuse same number of columns
-            for i, face_data in enumerate(similar_faces_display_data):
-                with grid_cols_similar[i % PERSON_CARD_COLS]:
-                    # Each similar face card
-                    st.markdown(
-                        "<div class='similar-face-card'>", unsafe_allow_html=True
-                    )
-                    if face_data["is_placeholder"]:
-                        st.markdown(face_data["face_html"], unsafe_allow_html=True)
-                    else:
-                        st.image(
-                            face_data["face_html"], width=SIMILAR_FACE_DISPLAY_SIZE[0]
+        with col_r:
+            if ss.similarity_results is None:
+                st.info("No results yet.")
+            elif not ss.similarity_results:
+                st.info("No similar faces found.")
+            else:
+                st.subheader(f"Top {len(ss.similarity_results)} Similar Faces")
+                for res in ss.similarity_results:
+                    b64 = None
+                    data = fetch_image_bytes_from_url(res.get("azure_blob_url"))
+                    if data:
+                        b64 = crop_and_encode_face(
+                            data, res.get("bbox", {}), SIMILAR_FACE_SIZE
                         )
-
+                    if b64:
+                        st.image(b64, width=SIMILAR_FACE_SIZE[0])
+                    else:
+                        st.markdown(
+                            f"<div class='similar-face-placeholder'>"
+                            f"ID:{res.get('cluster_id')}<br/>Dist:{res.get('distance'):.2f}</div>",
+                            unsafe_allow_html=True,
+                        )
                     st.caption(
-                        f"Person ID: {face_data['cluster_id']} (Dist: {face_data['distance']:.3f})"
+                        f"Person ID: {res.get('cluster_id')} | Distance: {res.get('distance'):.2f}"
                     )
+                    st.divider()
 
-                    # Button to view this person's images in gallery
-                    btn_key = f"view_similar_person_{face_data['cluster_id']}_{i}"
-                    if face_data["cluster_id"] not in [
-                        CLUSTER_ID_UNASSIGNED,
-                        CLUSTER_ID_PROCESSING,
-                    ]:  # Only allow filtering for valid clusters
-                        if st.button(
-                            "View This Person's Images",
-                            key=btn_key,
-                            type="secondary",
-                            use_container_width=True,
-                        ):
-                            ss.gallery_filter_cluster_list = [
-                                face_data["cluster_id"]
-                            ]  # Filter by this single cluster
-                            ss.gallery_page = 1
-                            ss.gallery_date_from = None
-                            ss.gallery_date_to = None
-                            ss.gallery_min_faces = 0
-                            ss.gallery_max_faces = 0
-                            st.switch_page(
-                                "pages/02_Gallery.py"
-                            )  # Ensure correct gallery page name
-                    st.markdown("</div>", unsafe_allow_html=True)
-    elif ss.similarity_query_image_b64:  # If query image was uploaded but no results yet (e.g. before search or after error)
-        st.markdown("##### Your Query Image:")
-        st.image(f"data:image/png;base64,{ss.similarity_query_image_b64}", width=150)
-
-
-# --- Custom CSS (Consolidated from previous Identical People tab) ---
+# --------------------------------------------------------------------
+# Custom CSS
+# --------------------------------------------------------------------
 st.markdown(
     f"""
 <style>
-    /* Styles for Identified People Tab */
-    .person-card-visuals {{
-        display: flex; flex-direction: column; align-items: center;
-        text-align: center; margin-bottom: 10px; 
-    }}
-    .person-face-circle {{
-        width: {SAMPLE_FACE_DISPLAY_SIZE[0]}px; height: {SAMPLE_FACE_DISPLAY_SIZE[1]}px;
-        border-radius: 50%; object-fit: cover; margin-bottom: 10px;
-        background-color: #e0e0e0;
-        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-    }}
-    .person-face-circle:hover {{
-        transform: scale(1.05); box-shadow: 0px 4px 12px rgba(0,0,0,0.15);
-    }}
-    .person-label {{
-        font-weight: bold; font-size: 0.9em; margin-bottom: 0px; color: #333;
-        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
-    }}
-
-    /* Common styles for column wrappers if needed */
-    /* div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] {{ ... }} */
-    
-    /* Checkbox alignment for Identified People Tab */
-    div[data-testid="stCheckbox"] {{ /* This is general, might need more specificity if it conflicts */
-        display: flex; justify-content: center; padding-top: 5px; padding-bottom: 5px;   
-    }}
-
-    /* Styles for Unassigned/Processing expander images */
-    div[data-testid="stExpander"] div[data-testid="stImage"] img {{
-        border-radius: 50%; object-fit: cover; border: 2px solid #ddd;
-    }}
-
-    /* Styles for Similarity Search Tab Results */
-    .similar-face-card {{
-        display: flex;
-        flex-direction: column;
-        align-items: center; /* Center image and caption */
-        text-align: center;
-        padding: 8px;
-        border: 1px solid #e0e0e0;
-        border-radius: 8px;
-        margin-bottom: 15px;
-        background-color: #f9f9f9;
-    }}
-    .similar-face-card img {{ /* Targets images rendered by st.image from b64 string */
-        border-radius: 50%; /* Make displayed similar faces circular */
-        margin-bottom: 8px;
-    }}
-    .similar-face-placeholder {{
-        width: {SIMILAR_FACE_DISPLAY_SIZE[0]}px; height: {SIMILAR_FACE_DISPLAY_SIZE[1]}px;
-        border-radius: 50%; background-color: #e0e0e0; display: flex;
-        justify-content: center; align-items: center; font-size: 0.8em;
-        color: #555; border: 1px solid #ccc; margin-bottom: 8px;
-        padding: 5px; box-sizing: border-box;
-    }}
-    .similar-face-card div[data-testid="stCaption"] {{ /* Targets st.caption under similar faces */
-        font-size: 0.8em;
-        color: #333;
-        margin-bottom: 8px;
-    }}
-    .similar-face-card div[data-testid="stButton"] > button {{ /* Targets button under similar faces */
-        font-size: 0.85em;
-        padding: 4px 8px;
-    }}
-
+.similar-face-placeholder {{
+  width:{SIMILAR_FACE_SIZE[0]}px;
+  height:{SIMILAR_FACE_SIZE[1]}px;
+  border-radius:50%;
+  background:#e0e0e0;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  text-align:center;
+  margin:auto 0;
+}}
 </style>
 """,
     unsafe_allow_html=True,

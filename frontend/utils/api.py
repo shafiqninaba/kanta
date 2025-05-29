@@ -239,10 +239,22 @@ def find_similar_faces(
         HTTPError: If the API returns a non-200 status.
     """
     url = f"{API_BASE_URL}/find-similar"
-    files = {"image": (image_filename, image_bytes, "image/jpeg")}
-    params = {"event_code": event_code, "metric": metric, "top_k": top_k}
+    files = {
+        # must match the parameter name "image" in FastAPI
+        "image": (image_filename, image_bytes, "image/jpeg")
+    }
+    # pass your Query args in the multipart body
+    params = {
+        "event_code": event_code,
+        "metric": metric,
+        "top_k": top_k,
+    }
 
-    response = requests.post(url, params=params, files=files, timeout=30)
+    response = requests.post(
+        url,
+        files=files,
+        params=params,
+        timeout=30,
+    )
     response.raise_for_status()
-
-    return response.json().get("results", [])
+    return response.json()
