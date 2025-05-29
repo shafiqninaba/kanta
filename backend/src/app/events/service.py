@@ -130,7 +130,7 @@ async def create_event(
         metadata={"event_code": payload.event_code},
     )
     # (Optional) store the public URL back on the model
-    # new_event.qr_code_url = f"{container.url}/{asset_path}"
+    new_event.qr_code_image_url = f"{container.url}/{asset_path}"
 
     # 5) Persist the Event row
     db.add(new_event)

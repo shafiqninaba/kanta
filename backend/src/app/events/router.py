@@ -157,13 +157,13 @@ async def update_event_endpoint(
 
 
 @router.put(
-    "/{code}/image",
+    "/image/{event_code}",
     response_model=EventInfo,
     status_code=status.HTTP_200_OK,
     summary="Upload or replace an event's image",
 )
 async def upsert_event_image_endpoint(
-    code: str = Path(..., description="Event code whose image to set"),
+    event_code: str = Path(..., description="Event code whose image to set"),
     image_file: UploadFile = File(..., description="Image file (jpg/png)"),
     db: AsyncSession = Depends(get_db),
     container: ContainerClient = Depends(get_event_container),
@@ -174,7 +174,7 @@ async def upsert_event_image_endpoint(
     Returns 404 if the event code doesn’t exist.
     """
     try:
-        event = await upsert_event_image(db, code, image_file, container)
+        event = await upsert_event_image(db, event_code, image_file, container)
     except EventNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return event

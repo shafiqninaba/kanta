@@ -5,7 +5,7 @@ from typing import Any, Optional
 from azure.core.exceptions import ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, ContainerClient
-from fastapi import Depends, Query
+from fastapi import Depends, Query, Path
 from loguru import logger
 
 from .config import get_settings
@@ -49,7 +49,7 @@ def get_blob_service() -> BlobServiceClient:
 
 
 def get_event_container(
-    event_code: str = Query(
+    event_code: str = Path(
         ...,
         description="Event code; also used as Azure container name",
         pattern=r"^[a-zA-Z0-9_]+$",
