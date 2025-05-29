@@ -10,11 +10,14 @@ from fastapi import (
     Path,
     Query,
     UploadFile,
+    Path,
     status,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
+from ..core.azure_blob import get_blob_service
 from ..db.base import get_db
 from .exceptions import EventAlreadyExists, EventNotFound
 from .schemas import (
@@ -193,6 +196,7 @@ async def upsert_event_image_endpoint(
 async def delete_event_endpoint(
     payload: DeleteEventInput,
     db: AsyncSession = Depends(get_db),
+    blob_service: BlobServiceClient = Depends(get_blob_service),
 ) -> None:
     """
     Delete an event and all its associated images and faces.
@@ -205,7 +209,7 @@ async def delete_event_endpoint(
         HTTPException 404: If no event with the given code is found.
     """
     try:
-        await delete_event(db, payload.event_code)
+        await delete_event(db, payload.event_code, blob_service)
     except EventNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

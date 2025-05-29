@@ -8,6 +8,8 @@ from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from azure.core.exceptions import ResourceNotFoundError
+from azure.storage.blob import BlobServiceClient
 
 from .exceptions import EventAlreadyExists, EventNotFound
 from .models import Event
@@ -189,7 +191,11 @@ async def upsert_event_image(
 # --------------------------------------------------------------------
 # DELETE EVENT
 # --------------------------------------------------------------------
-async def delete_event(db: AsyncSession, code: str) -> None:
+async def delete_event(
+    db: AsyncSession,
+    code: str,
+    blob_service: BlobServiceClient,
+) -> None:
     """
     Delete an existing Event (and cascade to images and faces via ORM relationships).
 
@@ -203,3 +209,10 @@ async def delete_event(db: AsyncSession, code: str) -> None:
     event = await get_event(db, code)
     await db.delete(event)
     await db.commit()
+
+    container_name = code.lower()
+    try:
+        blob_service.delete_container(container_name)
+    except ResourceNotFoundError:
+        # if the container did not exist, ignore
+        pass
