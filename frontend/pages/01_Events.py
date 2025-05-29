@@ -20,7 +20,7 @@ def main() -> None:
     ss = st.session_state
     ss.setdefault("edit_mode", False)
 
-    st.title("🎭 Events")
+    st.title("Events")
     tab_current, tab_create = st.tabs(["Current Event", "Create New Event"])
 
     # --------------------------------------------------------------------

@@ -214,10 +214,10 @@ DISPOSABLE CAMERA: {shots_left} SHOT{'S' if shots_left != 1 else ''} REMAINING
         up_col, del_col = st.columns(2)
         with up_col:
             if st.button(
-                "📤 Upload Selected Pending Shots",
+                "📤 Upload Selected Shots",
                 key="btn_upload",
                 use_container_width=True,
-                type="primary",
+                type="secondary",
             ):
                 selected = [
                     i for i in range(len(pending)) if ss.get(f"sel_pending_shot_{i}")
@@ -252,7 +252,7 @@ DISPOSABLE CAMERA: {shots_left} SHOT{'S' if shots_left != 1 else ''} REMAINING
                     st.rerun()
         with del_col:
             if st.button(
-                "🗑️ Delete Selected Pending Shots",
+                "🗑️ Delete Selected Shots",
                 key="btn_delete",
                 use_container_width=True,
                 type="secondary",
