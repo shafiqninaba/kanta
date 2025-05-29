@@ -10,6 +10,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Union
 
 import streamlit as st
+
 from utils.api import get_image_detail, get_images
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
@@ -68,27 +69,27 @@ if not ss.get("event_code"):
 # Filter Bar
 # --------------------------------------------------------------------
 st.markdown("#### Filter Images")
-cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 1.5])
+filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 1.5])  # Renamed to filter_cols
 
 # Date filters
-date_from = cols[0].date_input("From", ss.gallery_date_from)
-date_to = cols[1].date_input("To", ss.gallery_date_to)
+date_from = filter_cols[0].date_input("From", ss.gallery_date_from)
+date_to = filter_cols[1].date_input("To", ss.gallery_date_to)
 # Face count filters
-min_faces = cols[2].number_input("Min", min_value=0, value=ss.gallery_min_faces)
-max_faces = cols[3].number_input("Max", min_value=0, value=ss.gallery_max_faces)
+min_faces = filter_cols[2].number_input("Min", min_value=0, value=ss.gallery_min_faces)
+max_faces = filter_cols[3].number_input("Max", min_value=0, value=ss.gallery_max_faces)
 # Pagination filters
-limit = cols[4].selectbox(
+limit = filter_cols[4].selectbox(
     "Limit",
     IMAGES_PER_PAGE_OPTIONS,
     index=IMAGES_PER_PAGE_OPTIONS.index(ss.gallery_limit),
     key="gallery_filter_limit",
 )
-page = cols[5].number_input(
+page = filter_cols[5].number_input(
     "Page", min_value=1, value=ss.gallery_page, key="gallery_filter_page"
 )
 
 # Clear people filter or placeholder
-action_col = cols[6]
+action_col = filter_cols[6]
 if active_clusters:
     if action_col.button(
         "Clear People Filter",
@@ -101,10 +102,11 @@ if active_clusters:
         ss.gallery_face_selections.clear()
         st.rerun()
 else:
+    # This placeholder helps maintain vertical alignment in the filter bar
     action_col.markdown("<div style='height:38px'></div>", unsafe_allow_html=True)
 
 # Download selected button
-download_col = cols[7]
+download_col = filter_cols[7]
 selected_count = len(ss.gallery_selected_images)
 if download_col.button(
     "Download Selected",
@@ -129,23 +131,21 @@ for var, new in [
         filters_changed = True
 ss.gallery_limit = limit
 ss.gallery_page = page
-if (
-    filters_changed and ss.gallery_filter_clusters
-):  # Reset cluster filter if other filters change
+if filters_changed and ss.gallery_filter_clusters:
     ss.gallery_filter_clusters = None
     ss.gallery_face_selections.clear()
-    ss.gallery_page = 1  # Reset to page 1 when filters change
+    ss.gallery_page = 1
 
-# Prepare API filter parameters
-api_params: Dict[str, Union[str, int, List[int], None]] = {
-    "date_from": f"{date_from}T00:00:00" if date_from else None,
-    "date_to": f"{date_to}T23:59:59" if date_to else None,
-    "min_faces": min_faces or None,
-    "max_faces": max_faces or None,
-    "limit": limit,
-    "offset": (page - 1) * limit,
-    "cluster_list_id": ss.gallery_filter_clusters,
-}
+# Prepare API filter parameters for the get_images call
+# Ensure cluster_list_id is a tuple for caching if it's a list
+current_cluster_filter = ss.gallery_filter_clusters
+if isinstance(current_cluster_filter, list):
+    cluster_list_id_for_api = tuple(
+        sorted(set(current_cluster_filter))
+    )  # Use sorted set for consistent cache key
+else:
+    cluster_list_id_for_api = None
+
 
 # --------------------------------------------------------------------
 # Download Preparation Logic
@@ -160,20 +160,30 @@ if ss.gallery_prepare_download:
     with st.spinner(f"Preparing {count} image(s)..."):
         if count == 1:
             uuid, url = next(iter(selection.items()))
-            data = fetch_image_bytes_from_url(url)
-            if data:
+            # fetch_image_bytes_from_url is now cached
+            data_bytesio = fetch_image_bytes_from_url(url)
+            if data_bytesio:
                 ext = url.split(".")[-1].lower()[:4]
-                ss.gallery_download_data = data
+                ss.gallery_download_data = (
+                    data_bytesio  # st.download_button can handle BytesIO
+                )
                 ss.gallery_download_filename = f"{ss.event_code}_{uuid}.{ext}"
                 ss.gallery_download_mime = f"image/{ext}"
         else:
             buf = BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for uuid, url in selection.items():
-                    data = fetch_image_bytes_from_url(url)
-                    if data:
+                for i, (uuid, url) in enumerate(selection.items()):
+                    # Use a progress bar for multiple files
+                    st.progress(
+                        (i + 1) / count, text=f"Downloading image {i+1}/{count}"
+                    )
+                    data_bytesio = fetch_image_bytes_from_url(url)  # Cached call
+                    if data_bytesio:
                         ext = url.split(".")[-1].lower()[:4]
-                        zf.writestr(f"{ss.event_code}_{uuid}.{ext}", data.getvalue())
+                        # Ensure data is read from BytesIO for zf.writestr
+                        zf.writestr(
+                            f"{ss.event_code}_{uuid}.{ext}", data_bytesio.getvalue()
+                        )
             buf.seek(0)
             ss.gallery_download_data = buf
             ss.gallery_download_filename = f"{ss.event_code}_selected.zip"
@@ -183,6 +193,8 @@ if ss.gallery_prepare_download:
     st.rerun()
 
 # Show download button if ready
+# This button appears below the filter bar and uses use_container_width=True for full width.
+# This is generally considered "aligned properly" in this context.
 if ss.gallery_download_data:
     st.download_button(
         label=f"Download: {ss.gallery_download_filename}",
@@ -191,7 +203,11 @@ if ss.gallery_download_data:
         mime=ss.gallery_download_mime,
         use_container_width=True,
         key="gallery_download_button",
-        on_click=lambda: ss.pop("gallery_download_data", None),
+        on_click=lambda: ss.update(
+            gallery_download_data=None,
+            gallery_download_filename=None,
+            gallery_download_mime=None,
+        ),
     )
 
 st.markdown("---")
@@ -203,9 +219,9 @@ st.markdown("---")
 def image_detail_popover(image_uuid: str) -> None:
     """
     Display detailed view and face-selection for a given image UUID.
-    This function is now called conditionally.
+    get_image_detail and fetch_image_bytes_from_url are now cached.
     """
-    details = get_image_detail(image_uuid)  # Expensive API call
+    details = get_image_detail(image_uuid)
     if not details:
         st.error("Details unavailable.")
         return
@@ -226,12 +242,13 @@ def image_detail_popover(image_uuid: str) -> None:
         st.caption("No faces detected in this image.")
         return
 
-    st.markdown("##### Detected Faces:")  # Changed to markdown for style consistency
+    st.markdown("##### Detected Faces:")
 
-    stream = fetch_image_bytes_from_url(info.get("azure_blob_url"))
-    if not stream:
+    # fetch_image_bytes_from_url is cached
+    image_stream_bytesio = fetch_image_bytes_from_url(info.get("azure_blob_url"))
+
+    if not image_stream_bytesio:
         st.error("Cannot load image for face cropping.")
-        # Display faces info even if cropping fails
         for idx, face_info in enumerate(faces):
             cid = face_info.get("cluster_id")
             status_text = (
@@ -244,21 +261,21 @@ def image_detail_popover(image_uuid: str) -> None:
                 st.markdown("---")
         return
 
+    # Get image bytes once for all face crops
+    image_bytes_for_cropping = image_stream_bytesio.getvalue()
     selections = ss.gallery_face_selections.setdefault(image_uuid, {})
     valid_clusters: List[int] = []
 
-    # REMOVED st.columns here to prevent nesting error.
-    # Faces will be displayed sequentially (vertically).
     for idx, face in enumerate(faces):
         bbox = face.get("bbox", {})
         cid = face.get("cluster_id")
-        fid = face.get("uuid", f"face_{idx}")  # Use actual face UUID if available
+        fid = face.get("uuid", f"face_{idx}")
 
-        # Face thumbnail
-        if all(k in bbox for k in ("x", "y", "width", "height")) and stream:
-            # Create a new BytesIO for each crop to avoid issues with stream position
-            face_stream_copy = BytesIO(stream.getvalue())
-            b64 = crop_and_encode_face(face_stream_copy, bbox, (60, 60), 0.15, 0.15)
+        if all(k in bbox for k in ("x", "y", "width", "height")):
+            # crop_and_encode_face is now cached and expects bytes
+            b64 = crop_and_encode_face(
+                image_bytes_for_cropping, bbox, (60, 60), 0.15, 0.15
+            )
             if b64:
                 st.markdown(
                     f"<div class='popover-face-image'><img src='{b64}'></div>",
@@ -271,12 +288,11 @@ def image_detail_popover(image_uuid: str) -> None:
                 )
         else:
             st.markdown(
-                "<div class='popover-face-placeholder'>Face (no bbox/stream)</div>",
+                "<div class='popover-face-placeholder'>Face (no bbox)</div>",
                 unsafe_allow_html=True,
             )
 
-        # Selection or status indicator (displayed below the thumbnail)
-        key = f"filter_btn_popover_{image_uuid}_{fid}_{idx}"  # Ensure unique key
+        key = f"filter_btn_popover_{image_uuid}_{fid}_{idx}"
         if cid in (CLUSTER_ID_UNASSIGNED, CLUSTER_ID_PROCESSING):
             text = "Unidentified" if cid == CLUSTER_ID_UNASSIGNED else "Processing"
             st.markdown(
@@ -293,10 +309,9 @@ def image_detail_popover(image_uuid: str) -> None:
                 valid_clusters.append(cid)
 
         if idx < len(faces) - 1:
-            st.markdown("---")  # Separator between face entries
+            st.markdown("---")
 
-    st.markdown("---")  # Separator before the filter button
-
+    st.markdown("---")
     unique_clusters = sorted(set(valid_clusters))
     if st.button(
         f"Filter by these {len(unique_clusters)} Person(s)",
@@ -307,26 +322,37 @@ def image_detail_popover(image_uuid: str) -> None:
     ):
         ss.gallery_filter_clusters = unique_clusters
         ss.gallery_page = 1
-        # Reset other filters when applying person filter from popover
         ss.gallery_date_from = None
         ss.gallery_date_to = None
         ss.gallery_min_faces = 0
         ss.gallery_max_faces = 0
-        # Optionally, reset the specific popover's "requested" state
-        # popover_content_requested_key = f"gallery_popover_content_requested_{image_uuid}"
-        # ss[popover_content_requested_key] = False # This would require re-clicking "Load Details"
+        popover_content_requested_key = (
+            f"gallery_popover_content_requested_{image_uuid}"
+        )
+        ss[popover_content_requested_key] = False  # Close popover by resetting flag
         st.rerun()
 
 
 # --------------------------------------------------------------------
 # Fetch and Display Image Grid
 # --------------------------------------------------------------------
-images = get_images(ss.event_code, **api_params)
-if not isinstance(images, list):
-    st.error(f"API Error: Expected list, got {type(images)}")
+# Call the (now cached) get_images function
+images_data = get_images(
+    event_code=ss.event_code,
+    date_from=f"{date_from}T00:00:00" if date_from else None,
+    date_to=f"{date_to}T23:59:59" if date_to else None,
+    min_faces=min_faces or None,
+    max_faces=max_faces or None,
+    limit=limit,
+    offset=(page - 1) * limit,
+    cluster_list_id=cluster_list_id_for_api,
+)
+
+if not isinstance(images_data, list):  # type: ignore
+    st.error(f"API Error: Expected list from get_images, got {type(images_data)}")
     st.stop()
 
-if not images:
+if not images_data:
     msg = (
         "No images for selected people."
         if active_clusters
@@ -334,12 +360,10 @@ if not images:
     )
     st.info(msg)
 else:
-    st.write(f"Displaying {len(images)} image(s).")
-    grid_cols = st.columns(
-        NUM_GRID_COLS
-    )  # Renamed to avoid conflict if 'cols' is used elsewhere
+    st.write(f"Displaying {len(images_data)} image(s).")
+    grid_cols = st.columns(NUM_GRID_COLS)
 
-    for idx, img in enumerate(images):
+    for idx, img in enumerate(images_data):  # type: ignore
         with grid_cols[idx % NUM_GRID_COLS]:
             face_count_for_title = img.get("faces", img.get("faces_count", "N/A"))
             st.markdown(
@@ -350,7 +374,7 @@ else:
 """,
                 unsafe_allow_html=True,
             )
-            ctrl_cols = st.columns([0.7, 0.3])  # Renamed to avoid conflict
+            ctrl_cols = st.columns([0.7, 0.3])
             with ctrl_cols[0]:
                 popover_content_requested_key = (
                     f"gallery_popover_content_requested_{img['uuid']}"
@@ -359,7 +383,7 @@ else:
 
                 with st.popover("View Photo", use_container_width=True):
                     if ss[popover_content_requested_key]:
-                        image_detail_popover(img["uuid"])
+                        image_detail_popover(img["uuid"])  # Calls cached functions
                         if st.button(
                             "Hide Details",
                             key=f"hide_details_popover_{img['uuid']}",
@@ -444,9 +468,8 @@ st.markdown(
     color:#6c757d; 
     margin-bottom:10px; /* Added some margin below status */
 }}
-/* Ensure popover content has some padding if needed, Streamlit usually handles this well */
 div[data-testid="stPopoverContent"] > div {{
-    padding: 0.75rem; /* Slightly reduced padding for denser info */
+    padding: 0.75rem; 
 }}
 </style>
 """,

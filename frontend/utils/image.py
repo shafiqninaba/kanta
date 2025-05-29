@@ -3,6 +3,7 @@ from io import BytesIO
 from typing import Any, Dict, Optional, Tuple
 
 import requests
+import streamlit as st
 from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
 
 
@@ -38,6 +39,7 @@ def apply_filter_to_image(image: Image.Image, filter_mode: str) -> Image.Image:
     return image
 
 
+@st.cache_data
 def fetch_image_bytes_from_url(url: str, timeout: int = 15) -> Optional[BytesIO]:
     """
     Download image data from a URL and return it as a BytesIO stream.
@@ -63,57 +65,63 @@ def fetch_image_bytes_from_url(url: str, timeout: int = 15) -> Optional[BytesIO]
 
 
 def crop_and_encode_face(
-    full_image_stream: BytesIO,
-    bbox: Dict[str, Any],
+    image_bytes: bytes,
+    bbox: Dict[str, int],
     target_size: Tuple[int, int],
-    padding_w_factor: float = 0.3,
-    padding_h_factor: float = 0.3,
+    pad_x_ratio: float,
+    pad_y_ratio: float,
 ) -> Optional[str]:
     """
-    Crop a face region from an image, resize with padding, and return a base64-encoded PNG URI.
-
-    Args:
-        full_image_stream: BytesIO stream of the full image.
-        bbox: Dictionary with keys 'x', 'y', 'width', 'height' specifying the face box.
-        target_size: (width, height) of the output image.
-        padding_w_factor: Fractional padding of bbox width on each side.
-        padding_h_factor: Fractional padding of bbox height on each side.
-
-    Returns:
-        A data URL (str) containing the PNG-encoded face image, or None on error.
+    Crops a face from image bytes, resizes with padding, and encodes it as base64.
     """
     try:
-        img = Image.open(full_image_stream)
-        x = int(bbox.get("x", 0))
-        y = int(bbox.get("y", 0))
-        w = int(bbox.get("width", 0))
-        h = int(bbox.get("height", 0))
+        # --- THIS IS THE CRITICAL CHANGE ---
+        # Wrap the image_bytes in BytesIO for Pillow
+        img_stream = BytesIO(image_bytes)
+        img = Image.open(img_stream)
+        # --- END CRITICAL CHANGE ---
 
-        pad_w = int(w * padding_w_factor)
-        pad_h = int(h * padding_h_factor)
+        img = img.convert("RGB")  # Ensure it's RGB
 
-        left = max(0, x - pad_w)
-        top = max(0, y - pad_h)
-        right = min(img.width, x + w + pad_w)
-        bottom = min(img.height, y + h + pad_h)
+        # Original bounding box coordinates
+        x, y, w, h = bbox["x"], bbox["y"], bbox["width"], bbox["height"]
 
-        face = img.crop((left, top, right, bottom))
-        if face.width == 0 or face.height == 0:
-            return None
+        # Calculate padding in pixels
+        pad_x_pixels = int(w * pad_x_ratio)
+        pad_y_pixels = int(h * pad_y_ratio)
 
-        face.thumbnail(target_size, Image.Resampling.LANCZOS)
-        canvas = Image.new("RGB", target_size, (255, 255, 255))
-        paste_x = (target_size[0] - face.width) // 2
-        paste_y = (target_size[1] - face.height) // 2
-        canvas.paste(face, (paste_x, paste_y))
+        # Calculate expanded bounding box, ensuring it's within image bounds
+        x1 = max(0, x - pad_x_pixels)
+        y1 = max(0, y - pad_y_pixels)
+        x2 = min(img.width, x + w + pad_x_pixels)
+        y2 = min(img.height, y + h + pad_y_pixels)
 
-        buffer = BytesIO()
-        canvas.save(buffer, format="PNG")
-        b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        return f"data:image/png;base64,{b64}"
+        # Crop the image
+        cropped_face = img.crop((x1, y1, x2, y2))
 
-    except (UnidentifiedImageError, OSError):
+        # Resize to target_size while maintaining aspect ratio (padding with black if necessary)
+        # This uses ImageOps.fit for a "cover" like effect then resizes,
+        # or you can use thumbnail and then pad.
+        # For a simple resize then pad to make it square (if target_size is square):
+        # cropped_face.thumbnail(target_size, Image.Resampling.LANCZOS)
+        # new_image = Image.new("RGB", target_size, (0,0,0)) # Black background
+        # paste_x = (target_size[0] - cropped_face.width) // 2
+        # paste_y = (target_size[1] - cropped_face.height) // 2
+        # new_image.paste(cropped_face, (paste_x, paste_y))
+        # final_face = new_image
+
+        # A more robust resize that fits within target_size and pads (letterboxing/pillarboxing)
+        final_face = ImageOps.pad(
+            cropped_face, target_size, color="black", method=Image.Resampling.LANCZOS
+        )
+
+        # Encode to base64
+        buffered = BytesIO()
+        final_face.save(buffered, format="PNG")  # Or JPEG
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+
+    except Exception as e:
+        print(f"Error in crop_and_encode_face: {e}")
+        # Optionally, log the error or st.warning if appropriate for user feedback
         return None
-    except Exception:
-        # Let caller handle unexpected errors
-        raise
