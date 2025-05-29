@@ -136,6 +136,29 @@ def upload_image(event_code: str, image_file: Any) -> Dict[str, Any]:
     return response.json()
 
 
+def upload_event_image(event_code: str, image_file: Any) -> Dict[str, Any]:
+    """
+    Upload an image file to a specific event.
+
+    Args:
+        event_code: The event code to associate the image with.
+        image_file: File-like object (e.g., io.BytesIO or uploaded file).
+
+    Returns:
+        API response as a dictionary.
+
+    Raises:
+        HTTPError: If the API returns a non-2xx status.
+    """
+    url = f"{API_BASE_URL}/events/image/{event_code}"
+    files = {"image_file": (image_file.name, image_file, "image/jpeg")}
+
+    response = requests.put(url, files=files, timeout=10)
+    response.raise_for_status()
+
+    return response.json()
+
+
 def get_images(
     event_code: str, limit: int = 50, offset: int = 0, **filter_params: Optional[str]
 ) -> Dict[str, Any]:
