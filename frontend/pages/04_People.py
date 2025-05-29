@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Tuple
 
 import streamlit as st
 from PIL import Image, UnidentifiedImageError
+from requests import HTTPError
+
 from utils.api import find_similar_faces, get_clusters
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
@@ -62,7 +64,6 @@ tab_people, tab_similarity = st.tabs(["👥 Identified People", "🔍 Find Simil
 with tab_people:
     st.markdown("Select individuals below to filter the gallery by person.")
 
-    # Sample-size slider
     new_size = st.slider(
         "Sample faces per person",
         min_value=1,
@@ -75,8 +76,6 @@ with tab_people:
         ss.people_selected_clusters.clear()
 
     st.markdown("---")
-
-    # Fetch clusters
     with st.spinner(f"Loading {ss.people_sample_size} samples per person..."):
         clusters = get_clusters(ss.event_code, ss.people_sample_size)
 
@@ -85,10 +84,12 @@ with tab_people:
     else:
         persons = [c for c in clusters if c.get("cluster_id", -3) >= 0]
         unassigned = next(
-            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_UNASSIGNED), None
+            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_UNASSIGNED),
+            None,
         )
         processing = next(
-            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_PROCESSING), None
+            (c for c in clusters if c.get("cluster_id") == CLUSTER_ID_PROCESSING),
+            None,
         )
 
         # Build display cards
@@ -120,32 +121,39 @@ with tab_people:
         if not cards:
             st.info("No identified people to display.")
         else:
-            cols = st.columns(PERSON_CARD_COLS)
+            # use larger gap for more breathing room
+            cols = st.columns(PERSON_CARD_COLS, gap="large")
             for i, card in enumerate(cards):
                 with cols[i % PERSON_CARD_COLS]:
                     cid = card["cluster_id"]
-                    key = f"select_person_{cid}"
+                    key = f"select_person_{cid}_{i}"
                     selected = st.checkbox(
-                        f"Person {cid}",
+                        "",
                         value=ss.people_selected_clusters.get(cid, False),
                         key=key,
+                        label_visibility="collapsed",
                     )
                     ss.people_selected_clusters[cid] = selected
                     border = "3px solid #007bff" if selected else "3px solid #f0f2f6"
-                    html = f"""
-<div style='border:{border};border-radius:8px;display:flex;flex-direction:column;align-items:center;padding:8px;'>
-  <img id='{card['js_id']}' src='{card['initial']}' style='width:150px;height:150px;border-radius:50%;margin-bottom:8px;'>
+                    # card container
+                    st.markdown(
+                        f"""
+<div style='position:relative;border:{border};border-radius:8px;display:flex;flex-direction:column;align-items:center;padding:16px;'>
+  <img id='{card['js_id']}' src='{card['initial']}' 
+       style='width:150px;height:150px;border-radius:50%;margin-bottom:8px;'>
   <div style='text-align:center;font-size:0.9em;'>Person {cid} ({card['count']})</div>
 </div>
 <script>
 if (!document.getElementById('{card['js_id']}').dataset.swapping) {{
-  let arr = {json.dumps(card['urls'])};
-  let idx=0; let el=document.getElementById('{card['js_id']}');
+  let arr = {json.dumps(card['urls'])}; let idx=0;
+  let el=document.getElementById('{card['js_id']}');
   if(arr.length>1) setInterval(()=>{{ idx=(idx+1)%arr.length; el.src=arr[idx]; }}, {SWAP_INTERVAL_MS});
   el.dataset.swapping='true';
 }}
-</script>"""
-                    st.markdown(html, unsafe_allow_html=True)
+</script>
+""",
+                        unsafe_allow_html=True,
+                    )
 
             sel_ids = [cid for cid, sel in ss.people_selected_clusters.items() if sel]
             if st.button(
@@ -225,18 +233,30 @@ with tab_similarity:
             type="primary",
             use_container_width=True,
         ):
-            with st.spinner("Searching for similar faces..."):
-                results = (
-                    find_similar_faces(
-                        ss.event_code,
-                        query.getvalue(),
-                        query.name if hasattr(query, "name") else "uploaded.jpg",
-                        ss.similarity_metric,
-                        ss.similarity_top_k,
-                    )
-                    or []
-                )
-                ss.similarity_results = results
+            if not query:
+                st.warning("Please upload or take a photo first.")
+            else:
+                try:
+                    with st.spinner("Searching for similar faces..."):
+                        results = (
+                            find_similar_faces(
+                                ss.event_code,
+                                query.getvalue(),
+                                getattr(query, "name", "snapshot.jpg"),
+                                ss.similarity_metric,
+                                ss.similarity_top_k,
+                            )
+                            or []
+                        )
+                        ss.similarity_results = results
+                except HTTPError as err:
+                    # show the FastAPI 'detail' if available
+                    try:
+                        detail = err.response.json().get("detail", str(err))
+                    except Exception:
+                        detail = str(err)
+                    st.error(f"Search failed: {detail}")
+                    ss.similarity_results = []
 
     st.markdown("---")
 
@@ -267,25 +287,26 @@ with tab_similarity:
                 st.info("No similar faces found.")
             else:
                 st.subheader(f"Top {len(ss.similarity_results)} Similar Faces")
-                for res in ss.similarity_results:
-                    b64 = None
-                    data = fetch_image_bytes_from_url(res.get("azure_blob_url"))
-                    if data:
-                        b64 = crop_and_encode_face(
-                            data, res.get("bbox", {}), SIMILAR_FACE_SIZE
+                # grid of 3 columns
+                sim_cols = st.columns(3, gap="medium")
+                for idx, res in enumerate(ss.similarity_results):
+                    with sim_cols[idx % 3]:
+                        buf = fetch_image_bytes_from_url(res.get("azure_blob_url"))
+                        b64 = buf and crop_and_encode_face(
+                            buf, res.get("bbox", {}), SIMILAR_FACE_SIZE
                         )
-                    if b64:
-                        st.image(b64, width=SIMILAR_FACE_SIZE[0])
-                    else:
-                        st.markdown(
-                            f"<div class='similar-face-placeholder'>"
-                            f"ID:{res.get('cluster_id')}<br/>Dist:{res.get('distance'):.2f}</div>",
-                            unsafe_allow_html=True,
+                        if b64:
+                            st.image(b64, width=SIMILAR_FACE_SIZE[0])
+                        else:
+                            placeholder = (
+                                f"<div class='similar-face-placeholder'>"
+                                f"ID:{res.get('cluster_id')}<br/>Dist:{res.get('distance', 0):.2f}"
+                                f"</div>"
+                            )
+                            st.markdown(placeholder, unsafe_allow_html=True)
+                        st.caption(
+                            f"Person ID: {res.get('cluster_id')} | Distance: {res.get('distance', 0):.2f}"
                         )
-                    st.caption(
-                        f"Person ID: {res.get('cluster_id')} | Distance: {res.get('distance'):.2f}"
-                    )
-                    st.divider()
 
 # --------------------------------------------------------------------
 # Custom CSS
