@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from functools import lru_cache
 from azure.core.exceptions import ResourceExistsError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient, ContainerClient
@@ -41,6 +42,7 @@ _blob_client = setup_blob_service_client(
 )
 
 
+@lru_cache(maxsize=1)
 def get_blob_service() -> BlobServiceClient:
     """
     Dependency to retrieve the BlobServiceClient.
@@ -48,6 +50,7 @@ def get_blob_service() -> BlobServiceClient:
     return _blob_client
 
 
+@lru_cache(maxsize=128)
 def get_event_container(
     event_code: str = Path(
         ...,
