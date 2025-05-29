@@ -127,11 +127,10 @@ def upload_image(event_code: str, image_file: Any) -> Dict[str, Any]:
     Raises:
         HTTPError: If the API returns a non-201 status.
     """
-    url = f"{API_BASE_URL}/pics"
+    url = f"{API_BASE_URL}/pics/{event_code}"
     files = {"image": (image_file.name, image_file, "image/jpeg")}
-    params = {"event_code": event_code}
 
-    response = requests.post(url, params=params, files=files, timeout=10)
+    response = requests.post(url, files=files, timeout=10)
     response.raise_for_status()
 
     return response.json()
