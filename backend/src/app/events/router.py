@@ -80,12 +80,7 @@ async def get_events_endpoint(
 )
 async def create_event_endpoint(
     *,
-    event_code: str,
-    name: str | None = None,
-    description: str | None = None,
-    start_date_time: datetime | None = None,
-    end_date_time: datetime | None = None,
-    event_image_file: UploadFile | None = File(None, description="jpg/png"),
+    payload: CreateEventInput,
     db: AsyncSession = Depends(get_db),
     blob_service: BlobServiceClient = Depends(get_blob_service),
 ) -> EventInfo:

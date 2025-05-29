@@ -93,11 +93,11 @@ async def create_event(
     """
     # 1) Create the Event ORM
     new_event = Event(
-        code=code,
-        name=name,
-        description=description,
-        start_date_time=start_date_time,
-        end_date_time=end_date_time,
+        code=payload.event_code,
+        name=payload.name,
+        description=payload.description,
+        start_date_time=payload.start_date_time,
+        end_date_time=payload.end_date_time,
     )
 
     # 2) Generate QR image into memory
@@ -260,11 +260,8 @@ async def upsert_event_image(
     # compute the public URL
     image_url = f"{container.url}/{blob_path}"
 
-    # 4) persist the URL (or bytes if you still want)
-    event.event_image_url = (
-        image_url  # make sure `event_image_url` exists on your model
-    )
-    # if you still have a binary column you can skip or also set `event.event_image = raw`
+    # 4) persist the URL
+    event.event_image_url = image_url
 
     db.add(event)
     await db.commit()
