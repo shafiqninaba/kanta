@@ -3,8 +3,8 @@ from datetime import datetime
 from io import BytesIO
 from typing import List, Optional
 
-from fastapi import UploadFile
 import qrcode
+from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

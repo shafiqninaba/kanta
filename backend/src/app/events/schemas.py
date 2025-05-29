@@ -1,8 +1,8 @@
+import base64
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, model_validator, field_validator
-import base64
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CreateEventInput(BaseModel):
