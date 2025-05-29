@@ -13,11 +13,12 @@ from fastapi import (
     Path,
     status,
 )
+from azure.storage.blob import ContainerClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
-from ..core.azure_blob import get_blob_service
+from ..core.azure_blob import get_blob_service, get_event_container
 from ..db.base import get_db
 from .exceptions import EventAlreadyExists, EventNotFound
 from .schemas import (
@@ -91,23 +92,14 @@ async def create_event_endpoint(
     end_date_time: datetime | None = None,
     event_image_file: UploadFile | None = File(None, description="jpg/png"),
     db: AsyncSession = Depends(get_db),
+    blob_service: BlobServiceClient = Depends(get_blob_service),
 ) -> EventInfo:
     """
     Create an Event, optionally uploading an image.
     Generates a QR code pointing to `/events/{code}`.
     """
     try:
-        event = await create_event(
-            db,
-            code=event_code,
-            name=name,
-            description=description,
-            start_date_time=start_date_time,
-            end_date_time=end_date_time,
-            event_image_file=event_image_file,
-        )
-    except IntegrityError as exc:
-        raise HTTPException(400, "Event code already exists") from exc
+        event = await create_event(db, payload, blob_service)
     except EventAlreadyExists as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -174,13 +166,15 @@ async def upsert_event_image_endpoint(
     code: str = Path(..., description="Event code whose image to set"),
     image_file: UploadFile = File(..., description="Image file (jpg/png)"),
     db: AsyncSession = Depends(get_db),
+    container: ContainerClient = Depends(get_event_container),
 ) -> EventInfo:
     """
-    Idempotently attach or overwrite the image for an existing event.
+    Idempotently upload or overwrite the image for an existing event
+    into the container under `assets/event_image.<ext>`.
     Returns 404 if the event code doesn’t exist.
     """
     try:
-        event = await upsert_event_image(db, code, image_file)
+        event = await upsert_event_image(db, code, image_file, container)
     except EventNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return event

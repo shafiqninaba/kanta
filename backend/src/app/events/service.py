@@ -3,6 +3,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import List, Optional
 
+import os
 import qrcode
 from fastapi import UploadFile
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from .exceptions import EventAlreadyExists, EventNotFound
 from .models import Event
 from .schemas import CreateEventInput, UpdateEventInput
+from azure.storage.blob import ContainerClient
 
 
 # --------------------------------------------------------------------
@@ -76,13 +78,24 @@ async def get_event(db: AsyncSession, code: str) -> Event:
 # --------------------------------------------------------------------
 async def create_event(
     db: AsyncSession,
-    code: str,
-    name: str | None,
-    description: str | None,
-    start_date_time: datetime | None,
-    end_date_time: datetime | None,
-    event_image_file: UploadFile | None,
+    payload: CreateEventInput,
+    blob_service: BlobServiceClient,
 ) -> Event:
+    """
+    Create a new Event record in the database.
+
+    Args:
+        db (AsyncSession): The async database session.
+        payload (CreateEventInput): Pydantic model containing the event code, name,
+            description, start_date_time, and end_date_time.
+
+    Returns:
+        Event: The newly created Event ORM instance, with all fields populated (including id and created_at).
+
+    Raises:
+        EventAlreadyExists: If an Event with the same code already exists (unique constraint violation).
+    """
+    # 1) Create the Event ORM
     new_event = Event(
         code=code,
         name=name,
@@ -91,22 +104,42 @@ async def create_event(
         end_date_time=end_date_time,
     )
 
-    # Generate a QR code for your link:
+    # 2) Generate QR image into memory
     qr = qrcode.QRCode(box_size=10, border=2)
     qr.add_data(f"https://your.domain.com/events/{payload.event_code}")
     qr.make(fit=True)
     img = qr.make_image()
     buf = BytesIO()
     img.save(buf, format="PNG")
-    new_event.qr_code_image = buf.getvalue()
+    buf.seek(0)
+    qr_bytes = buf.getvalue()
 
+    # 3) Grab/create the container
+    container = blob_service.get_container_client(payload.event_code)
+    try:
+        container.create_container(public_access="blob")
+    except ResourceExistsError:
+        pass
+
+    # 4) Upload the QR under `assets/qr.png`
+    asset_path = "assets/qr.png"
+    container.upload_blob(
+        name=asset_path,
+        data=qr_bytes,
+        overwrite=True,
+        metadata={"event_code": payload.event_code},
+    )
+    # (Optional) store the public URL back on the model
+    # new_event.qr_code_url = f"{container.url}/{asset_path}"
+
+    # 5) Persist the Event row
     db.add(new_event)
     try:
         await db.commit()
         await db.refresh(new_event)
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
-        raise EventAlreadyExists(code)
+        raise EventAlreadyExists(payload.event_code) from exc
 
     return new_event
 
@@ -199,6 +232,7 @@ async def upsert_event_image(
     db: AsyncSession,
     code: str,
     image_file: UploadFile,
+    container: ContainerClient,
 ):
     """
     Read bytes from image_file, attach them to event.event_image,
@@ -212,11 +246,29 @@ async def upsert_event_image(
     Returns:
         Event: The updated Event ORM instance with the new image attached.
     """
+    # 1) fetch or 404
     event = await get_event(db, code)
 
-    # read raw bytes
+    # 2) read bytes & determine extension
     raw = await image_file.read()
-    event.event_image = raw
+    ext = os.path.splitext(image_file.filename or "")[1].lstrip(".").lower() or "jpg"
+    blob_path = f"assets/event_image.{ext}"
+
+    # 3) upload to Azure
+    container.upload_blob(
+        name=blob_path,
+        data=raw,
+        overwrite=True,
+        metadata={"event_code": code},
+    )
+    # compute the public URL
+    image_url = f"{container.url}/{blob_path}"
+
+    # 4) persist the URL (or bytes if you still want)
+    event.event_image_url = (
+        image_url  # make sure `event_image_url` exists on your model
+    )
+    # if you still have a binary column you can skip or also set `event.event_image = raw`
 
     db.add(event)
     await db.commit()
