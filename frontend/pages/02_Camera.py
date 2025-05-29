@@ -27,7 +27,7 @@ def main() -> None:
     - Capture disposable shots with filters.
     - View and manage film-strip shots.
     """
-    # Initialize session state
+    # Session State Initialization
     init_session_state()
     get_event_selection()
     ss = st.session_state
@@ -36,9 +36,7 @@ def main() -> None:
     ss.setdefault("current_image_filter", IMAGE_FILTERS[0])
     ss.setdefault("last_processed_camera_frame", None)
 
-    # --------------------------------------------------------------------
     # Instructions
-    # --------------------------------------------------------------------
     st.markdown(
         """
 ### How it works

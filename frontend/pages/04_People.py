@@ -25,9 +25,7 @@ from utils.session import get_event_selection, init_session_state
 st.set_page_config(page_title="People & Similarity", page_icon="🧑‍🤝‍🧑", layout="wide")
 
 
-# --------------------------------------------------------------------
 # Constants
-# --------------------------------------------------------------------
 CLUSTER_ID_UNASSIGNED = -1
 CLUSTER_ID_PROCESSING = -2
 PERSON_DISPLAY_COLS = 4  # Number of people to display per row
@@ -35,9 +33,7 @@ SAMPLE_FACE_SIZE: Tuple[int, int] = (100, 100)
 SIMILAR_FACE_SIZE: Tuple[int, int] = (120, 120)
 SWAP_INTERVAL_MS = 5_000
 
-# --------------------------------------------------------------------
 # Session State Initialization
-# --------------------------------------------------------------------
 init_session_state()
 get_event_selection()
 ss = st.session_state
@@ -48,22 +44,18 @@ ss.setdefault("similarity_metric", "cosine")
 ss.setdefault("similarity_results", None)
 ss.setdefault("similarity_query_b64", None)
 
-# --------------------------------------------------------------------
-# Title and Event Validation
-# --------------------------------------------------------------------
+
 st.title("People")
 if not ss.get("event_code"):
     st.warning("👈 Select an event from the sidebar first.")
     st.stop()
 
-# --------------------------------------------------------------------
-# Tabs
-# --------------------------------------------------------------------
+# tabs
 tab_people, tab_similarity = st.tabs(["Identified People", "Face Similarity Search"])
 
-# =================================
+# --------------------------------------------------------------------
 # TAB 1: IDENTIFIED PEOPLE
-# =================================
+# --------------------------------------------------------------------
 with tab_people:
     st.markdown("#### Select Individuals")
     st.caption("Select individuals below to filter the image gallery by person.")
@@ -256,9 +248,10 @@ with tab_people:
                 f"⚙️ Still processing approximately {processing['face_count']} new faces. Check back later for more updates."
             )
 
-# =================================
-# TAB 2: SIMILARITY SEARCH (Unchanged from your last version)
-# =================================
+
+# --------------------------------------------------------------------
+# TAB 2: FACE SIMILARITY SEARCH
+# --------------------------------------------------------------------
 with tab_similarity:
     st.caption(
         "Upload an image or use your camera to find people with similar faces within this event."
@@ -416,7 +409,7 @@ with tab_similarity:
 # Custom CSS (Unchanged from your last version)
 # --------------------------------------------------------------------
 st.markdown(
-    f"""
+    """
 <style>
     /* Identified People Tab */
     div[data-testid="stHorizontalBlock"] > div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlock"] .stContainer {{

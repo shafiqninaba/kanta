@@ -5,7 +5,7 @@ from requests import HTTPError
 from utils.api import create_event, get_events, update_event
 from utils.session import get_event_selection, init_session_state
 
-# Configure the Streamlit page
+# Page Configuration
 st.set_page_config(page_title="Events 🎭", page_icon="🎭", layout="wide")
 
 
@@ -15,6 +15,7 @@ def main() -> None:
       1. Current Event: view & edit an existing event
       2. Create New Event
     """
+    # Session State Initialization
     init_session_state()
     get_event_selection()
     ss = st.session_state

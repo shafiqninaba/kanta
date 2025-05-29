@@ -18,9 +18,7 @@ from utils.session import get_event_selection, init_session_state
 # Page Configuration
 st.set_page_config(page_title="Image Gallery", page_icon="🖼️", layout="wide")
 
-# --------------------------------------------------------------------
-# Constants and Defaults
-# --------------------------------------------------------------------
+# Constants
 IMAGES_PER_PAGE_OPTIONS: List[int] = [10, 20, 30, 50, 100]
 DEFAULT_IMAGES_PER_PAGE: int = 20
 NUM_GRID_COLS: int = 5
@@ -28,9 +26,7 @@ THUMBNAIL_ASPECT_PADDING: str = "100%"
 CLUSTER_ID_UNASSIGNED: int = -1
 CLUSTER_ID_PROCESSING: int = -2
 
-# --------------------------------------------------------------------
 # Session State Initialization
-# --------------------------------------------------------------------
 init_session_state()
 get_event_selection()
 ss = st.session_state
@@ -58,9 +54,7 @@ if active_clusters:
     ids = ", ".join(map(str, sorted(set(active_clusters))))
     st.info(f"ℹ️ Showing images for persons: {ids}.")
 
-# --------------------------------------------------------------------
-# Event Selection Check
-# --------------------------------------------------------------------
+# Check if an event is selected
 if not ss.get("event_code"):
     st.warning("👈 Select an event from the sidebar to view images.")
     st.stop()
@@ -335,7 +329,6 @@ def image_detail_popover(image_uuid: str) -> None:
 # --------------------------------------------------------------------
 # Fetch and Display Image Grid
 # --------------------------------------------------------------------
-# Call the (now cached) get_images function
 images_data = get_images(
     event_code=ss.event_code,
     date_from=f"{date_from}T00:00:00" if date_from else None,
