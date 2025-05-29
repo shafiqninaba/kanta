@@ -1,10 +1,8 @@
 import time
 from io import BytesIO
-from typing import Any, List, Optional
 
 import streamlit as st
 from PIL import Image
-from requests import HTTPError
 from utils.api import upload_image
 from utils.image import apply_filter_to_image
 from utils.session import get_event_selection, init_session_state

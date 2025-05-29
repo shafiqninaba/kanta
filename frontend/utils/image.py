@@ -1,10 +1,10 @@
 import base64
 from io import BytesIO
-from typing import Any, Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import requests
 import streamlit as st
-from PIL import Image, ImageEnhance, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageOps
 
 
 def apply_filter_to_image(image: Image.Image, filter_mode: str) -> Image.Image:

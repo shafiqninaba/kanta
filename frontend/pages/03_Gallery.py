@@ -7,10 +7,9 @@ Allows filtering, selection, bulk download, and detailed inspection of images.
 import zipfile
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Union
+from typing import List
 
 import streamlit as st
-
 from utils.api import get_image_detail, get_images
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state

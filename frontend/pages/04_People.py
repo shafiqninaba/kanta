@@ -5,19 +5,16 @@ Allows browsing identified people, filtering the gallery by person,
 and finding similar faces via upload or camera capture.
 """
 
-import base64
 import json
-from io import BytesIO
-from typing import Any, Dict, List, Tuple, Optional
+from typing import List, Tuple
 
 import streamlit as st
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image
 from requests import HTTPError
-
 from utils.api import find_similar_faces, get_clusters
 from utils.image import (
-    fetch_image_bytes_from_url,
     crop_and_encode_face,
+    fetch_image_bytes_from_url,
 )
 from utils.session import get_event_selection, init_session_state
 

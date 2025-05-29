@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from requests import HTTPError
-import streamlit as st
 
 API_BASE_URL: str = os.getenv("BACKEND_SERVER_URL", "http://backend:8000")
 
