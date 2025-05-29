@@ -272,7 +272,6 @@ def image_detail_popover(image_uuid: str) -> None:
         fid = face.get("uuid", f"face_{idx}")
 
         if all(k in bbox for k in ("x", "y", "width", "height")):
-            # crop_and_encode_face is now cached and expects bytes
             b64 = crop_and_encode_face(
                 image_bytes_for_cropping, bbox, (60, 60), 0.15, 0.15
             )

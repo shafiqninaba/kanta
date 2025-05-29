@@ -68,8 +68,8 @@ def crop_and_encode_face(
     image_bytes: bytes,
     bbox: Dict[str, int],
     target_size: Tuple[int, int],
-    pad_x_ratio: float,
-    pad_y_ratio: float,
+    pad_x_ratio: float = 0.3,
+    pad_y_ratio: float = 0.3,
 ) -> Optional[str]:
     """
     Crops a face from image bytes, resizes with padding, and encodes it as base64.
@@ -121,7 +121,5 @@ def crop_and_encode_face(
         img_str = base64.b64encode(buffered.getvalue()).decode()
         return f"data:image/png;base64,{img_str}"
 
-    except Exception as e:
-        print(f"Error in crop_and_encode_face: {e}")
-        # Optionally, log the error or st.warning if appropriate for user feedback
-        return None
+    except Exception:
+        raise
