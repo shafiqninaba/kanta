@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from requests import HTTPError
 
-API_BASE_URL: str = os.getenv("BACKEND_SERVER_URL", "http://backend:8000")
+API_BASE_URL: str = os.getenv("BACKEND_SERVER_URL", "http://backend/api/v1/:8000")
 
 
 def get_events(event_code: Optional[str] = None) -> List[Dict[str, Any]]:

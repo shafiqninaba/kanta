@@ -76,7 +76,7 @@ def main() -> None:
                                 try:
                                     upload_event_image(event_code=code, image_file=buf)
                                     st.success("Image updated!")
-                                    st.experimental_rerun()
+                                    st.rerun()
                                 except requests.HTTPError as err:
                                     detail = err.response.text or str(err)
                                     st.error(
@@ -153,7 +153,7 @@ def main() -> None:
                             )
                             st.success("Event updated!")
                             ss.edit_mode = False
-                            st.experimental_rerun()
+                            st.rerun()
                         except requests.HTTPError as err:
                             detail = err.response.text or str(err)
                             st.error(
@@ -161,11 +161,11 @@ def main() -> None:
                             )
                     if b2.form_submit_button("Cancel"):
                         ss.edit_mode = False
-                        st.experimental_rerun()
+                        st.rerun()
                 else:
                     if st.form_submit_button("Edit Event"):
                         ss.edit_mode = True
-                        st.experimental_rerun()
+                        st.rerun()
 
     # ─── Create New Event Tab ────────────────────────────────
     with tab_create:
@@ -193,7 +193,7 @@ def main() -> None:
                     st.success(f"Created '{new.get('name',new['code'])}'!")
                     ss.event_code = new["code"]
                     ss.just_created = True
-                    st.experimental_rerun()
+                    st.rerun()
 
         if ss.just_created:
             new_event = get_events(event_code=code)[0]
@@ -211,7 +211,7 @@ def main() -> None:
                 if qr_data:
                     st.image(qr_data, width=300)
                     st.download_button(
-                        "Download QR Code",
+                        "Download Event QR Code",
                         data=qr_data,
                         file_name=f"{ss.event_code}_qr.png",
                         mime="image/png",
