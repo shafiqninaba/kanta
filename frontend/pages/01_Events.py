@@ -1,8 +1,7 @@
 import io
-import time
+import requests
 from datetime import date, datetime, time as t
 
-import requests
 import streamlit as st
 
 from utils.api import (
@@ -30,175 +29,195 @@ def main() -> None:
 
     tab_current, tab_create = st.tabs(["Current Event", "Create New Event"])
 
-    # ─── Tab 1 ──────────────────────────────────────────────────
+    # ─── Current Event Tab ─────────────────────────────────
     with tab_current:
-        st.header("Current Event")
-
         if not ss.get("event_code"):
-            st.warning("Select or create an event first.")
-            return
+            st.warning(
+                "Select or create an event first to view or edit existing events."
+            )
         else:
-            # Fetch current event details
             code = ss.event_code
             event = get_events(event_code=code)[0]
+            # Handle nullable image_url
+            image_url = event.get("event_image_url") or None
+            qr_url = event.get("qr_code_image_url") or None
 
-        col_img, col_details = st.columns([3, 3], gap="medium")
-
-        # ── Event image & uploader ─────────────────────────────
-        with col_img:
-            st.subheader("Event Image")
-            img_url = event.get(
-                "event_image_url", "https://via.placeholder.com/300?text=No+Event+Image"
-            )
-            st.image(
-                img_url,
-                caption=event.get("name") or event["code"],
-                use_container_width=True,
-            )
-
-            with st.form("upload_image_form", clear_on_submit=True):
-                uploaded = st.file_uploader(
-                    "Select new event image",
-                    type=["jpg", "jpeg", "png"],
-                )
-                if st.form_submit_button("Upload Image"):
-                    if not uploaded:
-                        st.warning("Please select a file first.")
-                    else:
-                        try:
-                            buf = io.BytesIO(uploaded.getvalue())
-                            buf.name = uploaded.name
-                            upload_event_image(event_code=ss.event_code, image_file=buf)
-                            st.success("Image updated!")
-                            st.rerun()
-                        except requests.HTTPError as err:
-                            st.error(f"Upload failed: {err}")
-                        except Exception as e:
-                            st.error(f"Unexpected error: {e}")
-
-        # ── Event details form ─────────────────────────────────
-        with col_details.form("event_form"):
-            st.subheader("Event Details")
-
-            name = st.text_input(
-                "Name", value=event.get("name") or "", disabled=not ss.edit_mode
-            )
-            desc = st.text_area(
-                "Description",
-                value=event.get("description") or "",
-                disabled=not ss.edit_mode,
-            )
-
-            c1, c2 = st.columns(2)
-            start_date = c1.date_input(
-                "Start Date",
-                value=date.fromisoformat(event["start_date_time"][:10]),
-                disabled=not ss.edit_mode,
-            )
-            start_time = c2.time_input(
-                "Start Time",
-                value=datetime.fromisoformat(event["start_date_time"]).time(),
-                disabled=not ss.edit_mode,
-            )
-            c3, c4 = st.columns(2)
-            end_date = c3.date_input(
-                "End Date",
-                value=date.fromisoformat(event["end_date_time"][:10]),
-                disabled=not ss.edit_mode,
-            )
-            end_time = c4.time_input(
-                "End Time",
-                value=datetime.fromisoformat(event["end_date_time"]).time(),
-                disabled=not ss.edit_mode,
-            )
-
-            if ss.edit_mode:
-                b1, b2 = st.columns(2)
-                if b1.form_submit_button("Save Changes"):
+            col1, col2 = st.columns([3, 2], gap="medium")
+            with col1:
+                img_data = None
+                if image_url:
                     try:
-                        update_event(
-                            event_code=ss.event_code,
-                            name=name or None,
-                            description=desc or None,
-                            start_date_time=datetime.combine(start_date, start_time),
-                            end_date_time=datetime.combine(end_date, end_time),
+                        resp = requests.get(image_url)
+                        resp.raise_for_status()
+                        img_data = resp.content
+                    except Exception:
+                        pass
+                # Display event image or blank if none
+                if img_data:
+                    st.image(
+                        img_data,
+                        caption=event.get("name") or code,
+                        use_container_width=True,
+                    )
+                else:
+                    st.empty()
+
+                with st.expander("Change Event Image"):
+                    with st.form("upload_image_form", clear_on_submit=True):
+                        uploaded = st.file_uploader(
+                            "Select new event image", type=["jpg", "jpeg", "png"]
                         )
-                        st.success("Event updated!")
+                        if st.form_submit_button("Upload"):
+                            if not uploaded:
+                                st.warning("Please select a file first.")
+                            else:
+                                buf = io.BytesIO(uploaded.getvalue())
+                                buf.name = uploaded.name
+                                try:
+                                    upload_event_image(event_code=code, image_file=buf)
+                                    st.success("Image updated!")
+                                    st.experimental_rerun()
+                                except requests.HTTPError as err:
+                                    detail = err.response.text or str(err)
+                                    st.error(
+                                        f"Upload failed ({err.response.status_code}): {detail}"
+                                    )
+                                except Exception as e:
+                                    st.error(f"Unexpected error: {e}")
+            with col2:
+                if qr_url:
+                    st.subheader("Event QR Code")
+                    qr_data = None
+                    try:
+                        qr_resp = requests.get(qr_url)
+                        qr_resp.raise_for_status()
+                        qr_data = qr_resp.content
+                    except Exception:
+                        pass
+                    if qr_data:
+                        st.image(qr_data, width=300)
+                        st.download_button(
+                            "Download QR Code",
+                            data=qr_data,
+                            file_name=f"{code}_qr.png",
+                            mime="image/png",
+                        )
+                    else:
+                        st.empty()
+
+            st.markdown("---")
+            st.header("Event Details")
+            with st.form("event_form"):
+                name = st.text_input(
+                    "Name", value=event.get("name") or "", disabled=not ss.edit_mode
+                )
+                desc = st.text_area(
+                    "Description",
+                    value=event.get("description") or "",
+                    disabled=not ss.edit_mode,
+                )
+                c1, c2 = st.columns(2)
+                start_date = c1.date_input(
+                    "Start Date",
+                    value=date.fromisoformat(event["start_date_time"][:10]),
+                    disabled=not ss.edit_mode,
+                )
+                start_time = c2.time_input(
+                    "Start Time",
+                    value=datetime.fromisoformat(event["start_date_time"]).time(),
+                    disabled=not ss.edit_mode,
+                )
+                c3, c4 = st.columns(2)
+                end_date = c3.date_input(
+                    "End Date",
+                    value=date.fromisoformat(event["end_date_time"][:10]),
+                    disabled=not ss.edit_mode,
+                )
+                end_time = c4.time_input(
+                    "End Time",
+                    value=datetime.fromisoformat(event["end_date_time"]).time(),
+                    disabled=not ss.edit_mode,
+                )
+                if ss.edit_mode:
+                    b1, b2 = st.columns(2)
+                    if b1.form_submit_button("Save Changes"):
+                        try:
+                            update_event(
+                                event_code=code,
+                                name=name or None,
+                                description=desc or None,
+                                start_date_time=datetime.combine(
+                                    start_date, start_time
+                                ),
+                                end_date_time=datetime.combine(end_date, end_time),
+                            )
+                            st.success("Event updated!")
+                            ss.edit_mode = False
+                            st.experimental_rerun()
+                        except requests.HTTPError as err:
+                            detail = err.response.text or str(err)
+                            st.error(
+                                f"Update failed ({err.response.status_code}): {detail}"
+                            )
+                    if b2.form_submit_button("Cancel"):
                         ss.edit_mode = False
-                        st.rerun()
-                    except requests.HTTPError as err:
-                        st.error(f"Update failed: {err}")
-                if b2.form_submit_button("Cancel"):
-                    ss.edit_mode = False
-                    st.rerun()
-            else:
-                if st.form_submit_button("Edit Event"):
-                    ss.edit_mode = True
-                    st.rerun()
+                        st.experimental_rerun()
+                else:
+                    if st.form_submit_button("Edit Event"):
+                        ss.edit_mode = True
+                        st.experimental_rerun()
 
-        # ── QR code ────────────────────────────────────────────
-        st.markdown("---")
-        st.subheader("Event QR Code")
-        qr_url = event.get("qr_code_image_url")
-        if qr_url:
-            st.image(qr_url, width=300)
-            qr_bytes = requests.get(qr_url).content
-            st.download_button(
-                "Download QR Code",
-                data=qr_bytes,
-                file_name=f"{event['code']}_qr.png",
-                mime="image/png",
-            )
-
-    # ─── Tab 2 ─────────────────────────────────────────────────
+    # ─── Create New Event Tab ────────────────────────────────
     with tab_create:
         st.header("Create New Event")
         with st.form("create_form"):
             code = st.text_input("Event Code")
             name = st.text_input("Event Name")
             desc = st.text_area("Description")
-
             cols = st.columns(4)
             d0 = cols[0].date_input("Start Date", value=date.today())
             t0 = cols[1].time_input("Start Time", value=t(9, 0), step=1800)
             d1 = cols[2].date_input("End Date", value=date.today())
             t1 = cols[3].time_input("End Time", value=t(17, 0), step=1800)
-
             if st.form_submit_button("Create Event"):
                 if not code.strip():
                     st.error("Event Code is required.")
                 else:
-                    try:
-                        new = create_event(
-                            event_code=code.strip(),
-                            name=name or None,
-                            description=desc or None,
-                            start_date_time=datetime.combine(d0, t0),
-                            end_date_time=datetime.combine(d1, t1),
-                        )
-                        st.success(f"Created '{new.get('name', new['code'])}'!")
-                        ss.event_code = new["code"]
-                        ss.just_created = True
-                        st.rerun()
-                    except requests.HTTPError as err:
-                        st.error(f"Creation failed: {err}")
-                    except Exception as e:
-                        st.error(f"Unexpected error: {e}")
+                    new = create_event(
+                        event_code=code.strip(),
+                        name=name or None,
+                        description=desc or None,
+                        start_date_time=datetime.combine(d0, t0),
+                        end_date_time=datetime.combine(d1, t1),
+                    )
+                    st.success(f"Created '{new.get('name',new['code'])}'!")
+                    ss.event_code = new["code"]
+                    ss.just_created = True
+                    st.experimental_rerun()
 
         if ss.just_created:
             new_event = get_events(event_code=code)[0]
-            if new_event and new_event.get("qr_code_image_url"):
+            qr_url = new_event.get("qr_code_image_url")
+            if qr_url:
                 st.markdown("---")
                 st.subheader("Your Event QR Code—save it!")
-                qr_url = new_event["qr_code_image_url"]
-                st.image(qr_url, width=300)
-                qr_bytes = requests.get(qr_url).content
-                st.download_button(
-                    "Download QR Code",
-                    data=qr_bytes,
-                    file_name=f"{ss.event_code}_qr.png",
-                    mime="image/png",
-                )
+                qr_data = None
+                try:
+                    qr_resp = requests.get(qr_url)
+                    qr_resp.raise_for_status()
+                    qr_data = qr_resp.content
+                except Exception:
+                    pass
+                if qr_data:
+                    st.image(qr_data, width=300)
+                    st.download_button(
+                        "Download QR Code",
+                        data=qr_data,
+                        file_name=f"{ss.event_code}_qr.png",
+                        mime="image/png",
+                    )
+                else:
+                    st.empty()
 
 
 if __name__ == "__main__":
