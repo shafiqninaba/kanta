@@ -3,6 +3,7 @@ from io import BytesIO
 from typing import List, Optional
 
 import qrcode
+from urllib.parse import urljoin
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from fastapi import UploadFile
@@ -91,7 +92,7 @@ async def create_event(
     Raises:
         EventAlreadyExists: If an Event with the same code already exists (unique constraint violation).
     """
-    # 1) Create the Event ORM
+    # Create the Event ORM
     new_event = Event(
         code=payload.event_code,
         name=payload.name,
@@ -100,35 +101,7 @@ async def create_event(
         end_date_time=payload.end_date_time,
     )
 
-    # 2) Generate QR image into memory
-    qr = qrcode.QRCode(box_size=10, border=2)
-    qr.add_data(f"https://your.domain.com/events/{payload.event_code}")
-    qr.make(fit=True)
-    img = qr.make_image()
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    qr_bytes = buf.getvalue()
-
-    # 3) Grab/create the container
-    container = blob_service.get_container_client(payload.event_code)
-    try:
-        container.create_container(public_access="blob")
-    except ResourceExistsError:
-        pass
-
-    # 4) Upload the QR under `assets/qr.png`
-    asset_path = "assets/qr.png"
-    container.upload_blob(
-        name=asset_path,
-        data=qr_bytes,
-        overwrite=True,
-        metadata={"event_code": payload.event_code},
-    )
-    # (Optional) store the public URL back on the model
-    new_event.qr_code_image_url = f"{container.url}/{asset_path}"
-
-    # 5) Persist the Event row
+    # Persist to DB
     db.add(new_event)
     try:
         await db.commit()
@@ -136,6 +109,35 @@ async def create_event(
     except IntegrityError as exc:
         await db.rollback()
         raise EventAlreadyExists(payload.event_code) from exc
+
+    # Generate QR image into memory
+    qr = qrcode.QRCode(box_size=10, border=2)
+    service_url = os.getenv("KANTA_SERVICE_URL", "https://your.domain.com")
+    event_url = urljoin(service_url.rstrip("/") + "/", payload.event_code)
+    qr.add_data(event_url)
+    qr.make(fit=True)
+    img = qr.make_image()
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    qr_bytes = buf.getvalue()
+
+    # Grab/create the container
+    container = blob_service.get_container_client(payload.event_code)
+    try:
+        container.create_container(public_access="blob")
+    except ResourceExistsError:
+        pass
+
+    # Upload the QR under `assets/qr.png`
+    asset_path = "assets/qr.png"
+    container.upload_blob(
+        name=asset_path,
+        data=qr_bytes,
+        overwrite=True,
+        metadata={"event_code": payload.event_code},
+    )
+    new_event.qr_code_image_url = f"{container.url}/{asset_path}"
 
     return new_event
 
@@ -216,6 +218,31 @@ async def update_event(
         except ResourceNotFoundError:
             pass
 
+    # Still need to generate a new QR code if the event code changed
+    if payload.new_event_code and payload.new_event_code != old_code:
+        # Generate new QR code image
+        qr = qrcode.QRCode(box_size=10, border=2)
+        service_url = os.getenv("KANTA_SERVICE_URL", "https://your.domain.com")
+        event_url = urljoin(service_url.rstrip("/") + "/", payload.new_event_code)
+        qr.add_data(event_url)
+        qr.make(fit=True)
+        img = qr.make_image()
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+        qr_bytes = buf.getvalue()
+
+        # Upload the new QR code image to the new container
+        container = blob_service.get_container_client(payload.new_event_code)
+        asset_path = "assets/qr.png"
+        container.upload_blob(
+            name=asset_path,
+            data=qr_bytes,
+            overwrite=True,
+            metadata={"event_code": payload.new_event_code},
+        )
+        event.qr_code_image_url = f"{container.url}/{asset_path}"
+
     # RIP: just realised that database images azure blob URL is NOT HANDLED...same for faces
     # In practice, this means that if you change the event code,
     # the image URLs will not automatically update.
@@ -242,15 +269,14 @@ async def upsert_event_image(
     Returns:
         Event: The updated Event ORM instance with the new image attached.
     """
-    # 1) fetch or 404
     event = await get_event(db, code)
 
-    # 2) read bytes & determine extension
+    # read bytes & determine extension
     raw = await image_file.read()
     ext = os.path.splitext(image_file.filename or "")[1].lstrip(".").lower() or "jpg"
     blob_path = f"assets/event_image.{ext}"
 
-    # 3) upload to Azure
+    # upload to Azure
     container.upload_blob(
         name=blob_path,
         data=raw,
@@ -260,9 +286,8 @@ async def upsert_event_image(
     # compute the public URL
     image_url = f"{container.url}/{blob_path}"
 
-    # 4) persist the URL
+    # persist the URL
     event.event_image_url = image_url
-
     db.add(event)
     await db.commit()
     await db.refresh(event)
@@ -291,6 +316,7 @@ async def delete_event(
     await db.delete(event)
     await db.commit()
 
+    # Delete the Azure Blob Storage container for this event
     container_name = code.lower()
     try:
         blob_service.delete_container(container_name)

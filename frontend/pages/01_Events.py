@@ -13,29 +13,12 @@ from utils.api import (
 )
 from utils.session import get_event_selection, init_session_state
 
-
-# ────────────────────────── Helpers ──────────────────────────
-def get_current_event(code: str) -> dict | None:
-    """Always fetch fresh data to avoid client-side caching."""
-    try:
-        return get_events(event_code=code)[0]
-    except Exception as err:
-        st.error(f"Could not load event: {err}")
-        return None
+# Page Configuration
+st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="wide")
 
 
-def cache_bust(url: str | None) -> str | None:
-    """Append a throw-away timestamp so the browser won’t reuse a stale image."""
-    if not url:
-        return None
-    return f"{url}?ts={int(time.time())}"
-
-
-# ────────────────────────── Main UI ──────────────────────────
 def main() -> None:
-    st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="wide")
-
-    # session state
+    # Session State Initialization
     init_session_state()
     get_event_selection()
     ss = st.session_state
@@ -54,22 +37,21 @@ def main() -> None:
         if not ss.get("event_code"):
             st.warning("Select or create an event first.")
             return
-
-        event = get_current_event(ss.event_code)
-        if not event:
-            return
+        else:
+            # Fetch current event details
+            code = ss.event_code
+            event = get_events(event_code=code)[0]
 
         col_img, col_details = st.columns([3, 3], gap="medium")
 
         # ── Event image & uploader ─────────────────────────────
         with col_img:
             st.subheader("Event Image")
-
-            img_url = cache_bust(event.get("event_image_url"))
-            placeholder = "https://via.placeholder.com/300?text=No+Event+Image"
-
+            img_url = event.get(
+                "event_image_url", "https://via.placeholder.com/300?text=No+Event+Image"
+            )
             st.image(
-                img_url or placeholder,
+                img_url,
                 caption=event.get("name") or event["code"],
                 use_container_width=True,
             )
@@ -86,11 +68,13 @@ def main() -> None:
                         try:
                             buf = io.BytesIO(uploaded.getvalue())
                             buf.name = uploaded.name
-                            upload_event_image(ss.event_code, buf)
+                            upload_event_image(event_code=ss.event_code, image_file=buf)
                             st.success("Image updated!")
                             st.rerun()
                         except requests.HTTPError as err:
                             st.error(f"Upload failed: {err}")
+                        except Exception as e:
+                            st.error(f"Unexpected error: {e}")
 
         # ── Event details form ─────────────────────────────────
         with col_details.form("event_form"):
@@ -155,7 +139,7 @@ def main() -> None:
         # ── QR code ────────────────────────────────────────────
         st.markdown("---")
         st.subheader("Event QR Code")
-        qr_url = cache_bust(event.get("qr_code_image_url"))
+        qr_url = event.get("qr_code_image_url")
         if qr_url:
             st.image(qr_url, width=300)
             qr_bytes = requests.get(qr_url).content
@@ -202,11 +186,11 @@ def main() -> None:
                         st.error(f"Unexpected error: {e}")
 
         if ss.just_created:
-            new_event = get_current_event(ss.event_code)
+            new_event = get_events(event_code=code)[0]
             if new_event and new_event.get("qr_code_image_url"):
                 st.markdown("---")
                 st.subheader("Your Event QR Code—save it!")
-                qr_url = cache_bust(new_event["qr_code_image_url"])
+                qr_url = new_event["qr_code_image_url"]
                 st.image(qr_url, width=300)
                 qr_bytes = requests.get(qr_url).content
                 st.download_button(
