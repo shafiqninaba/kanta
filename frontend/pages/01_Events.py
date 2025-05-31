@@ -1,9 +1,9 @@
 import io
+from datetime import date, datetime
+from datetime import time as t
+
 import requests
-from datetime import date, datetime, time as t
-
 import streamlit as st
-
 from utils.api import (
     create_event,
     get_events,
@@ -183,17 +183,25 @@ def main() -> None:
                 if not code.strip():
                     st.error("Event Code is required.")
                 else:
-                    new = create_event(
-                        event_code=code.strip(),
-                        name=name or None,
-                        description=desc or None,
-                        start_date_time=datetime.combine(d0, t0),
-                        end_date_time=datetime.combine(d1, t1),
-                    )
-                    st.success(f"Created '{new.get('name',new['code'])}'!")
-                    ss.event_code = new["code"]
-                    ss.just_created = True
-                    st.rerun()
+                    try:
+                        new = create_event(
+                            event_code=code.strip(),
+                            name=name or None,
+                            description=desc or None,
+                            start_date_time=datetime.combine(d0, t0),
+                            end_date_time=datetime.combine(d1, t1),
+                        )
+                        st.success(f"Created '{new.get('name',new['code'])}'!")
+                        ss.event_code = new["code"]
+                        ss.just_created = True
+                        st.rerun()
+                    except requests.HTTPError as err:
+                        detail = err.response.text or str(err)
+                        st.error(
+                            f"Creation failed ({err.response.status_code}): {detail}"
+                        )
+                    except Exception as e:
+                        st.error(f"Unexpected error: {e}")
 
         if ss.just_created:
             new_event = get_events(event_code=code)[0]
