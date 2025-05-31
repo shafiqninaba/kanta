@@ -28,6 +28,7 @@ from .service import (
     get_images,
     upload_image,
     process_faces,
+    full_processing_job,
 )
 
 router = APIRouter(prefix="/pics", tags=["images"])
@@ -165,37 +166,72 @@ async def upload(
     Raises:
         HTTPException: If the file is not a valid image, face detection fails, or storage/DB operations fail.
     """
-    # 1) Call service to upload to Azure and log Image row (faces=0)
-    try:
-        image_obj, blob_name = await upload_image(
-            db=db,
-            container=container,
-            event_code=event_code,
-            upload_file=image_file,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Unexpected errors bubble up as 500
-        raise HTTPException(status_code=500, detail=str(e))
+    # 1) Very basic MIME check
+    if not image_file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Must upload an image")
 
-    # 2) Schedule face‐processing in the background
+    # 2) Read raw bytes
+    raw_bytes = await image_file.read()
+
+    # 3) Generate a UUID for this image (so we can return it now)
+    import uuid as _uuid
+
+    image_uuid = _uuid.uuid4().hex
+
+    # 4) Enqueue the full job. Inside full_processing_job we will:
+    #      a) Upload to Azure
+    #      b) Create/update the Image row in the DB
+    #      c) Run face detection + insert Face rows
     background_tasks.add_task(
-        process_faces,
+        full_processing_job,
         db,
         container,
-        image_obj.id,
-        blob_name,
+        event_code,
+        image_uuid,
+        raw_bytes,
+        image_file.filename or "",  # so we know an extension if needed
     )
 
-    # 3) Return an “empty” face response—actual face count, boxes, embeddings come later
+    # 5) Return immediately with a “202 Accepted” and the UUID.
     return UploadImageResponse(
-        uuid=image_obj.uuid,
-        blob_url=image_obj.azure_blob_url,
+        uuid=image_uuid,
+        blob_url="",  # or “pending_upload”
         faces=0,
         boxes=[],
         embeddings=[],
     )
+
+    # # 1) Call service to upload to Azure and log Image row (faces=0)
+    # try:
+    #     image_obj, blob_name = await upload_image(
+    #         db=db,
+    #         container=container,
+    #         event_code=event_code,
+    #         upload_file=image_file,
+    #     )
+    # except HTTPException:
+    #     raise
+    # except Exception as e:
+    #     # Unexpected errors bubble up as 500
+    #     raise HTTPException(status_code=500, detail=str(e))
+
+    # # 2) Schedule face‐processing in the background
+    # background_tasks.add_task(
+    #     process_faces,
+    #     db,
+    #     container,
+    #     image_obj.id,
+    #     blob_name,
+    # )
+
+    # # 3) Return an “empty” face response—actual face count, boxes, embeddings come later
+    # return UploadImageResponse(
+    #     uuid=image_obj.uuid,
+    #     blob_url=image_obj.azure_blob_url,
+    #     faces=0,
+    #     boxes=[],
+    #     embeddings=[],
+    # )
 
 
 # --------------------------------------------------------------------

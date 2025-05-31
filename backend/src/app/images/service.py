@@ -411,6 +411,135 @@ async def process_faces(
     )
 
 
+async def full_processing_job(
+    db: AsyncSession,
+    container: ContainerClient,
+    event_code: str,
+    image_uuid: str,
+    raw_bytes: bytes,
+    original_filename: str,
+) -> None:
+    """
+    1) Validate event exists
+    2) Determine extension, blob_name
+    3) Upload raw_bytes to Azure
+    4) Create (or update) Image row in DB with URL + metadata
+    5) Run face detection on raw_bytes → (boxes, embeddings)
+    6) Update Image.faces and insert Face rows
+    """
+
+    # Step 1: Ensure event exists (so we know event.id)
+    try:
+        event = await get_event(db, event_code)
+        if not event:
+            logger.error(f"[job] Event '{event_code}' not found. Aborting.")
+            return
+    except Exception as e:
+        logger.error(f"[job] Error fetching event '{event_code}': {e}")
+        return
+
+    # Step 2: Determine extension from original filename
+    ext = (
+        original_filename.rsplit(".", 1)[-1].lower()
+        if "." in original_filename
+        else "png"
+    )
+    if ext not in {"jpg", "jpeg", "png", "bmp", "gif", "tiff"}:
+        ext = "png"
+    blob_name = f"images/{image_uuid}.{ext}"
+
+    # Step 3: Upload raw_bytes to Azure Blob
+    try:
+        container.upload_blob(
+            name=blob_name,
+            data=raw_bytes,
+            overwrite=True,
+            metadata={"event_code": event_code, "uuid": image_uuid},
+        )
+        blob_client = container.get_blob_client(blob_name)
+        props = blob_client.get_blob_properties()
+        final_url = f"{container.url}/{blob_name}"
+    except Exception as e:
+        logger.error(f"[job] Azure upload failed for '{image_uuid}': {e}")
+        return
+
+    # Step 4: Insert or update the Image row
+    image_obj = None
+    try:
+        # If you want a “stub” row created in the router, you'd fetch it here, otherwise create anew:
+        image_obj = Image(
+            event_id=event.id,
+            uuid=image_uuid,
+            azure_blob_url=final_url,
+            file_extension=ext,
+            faces=0,
+            created_at=props.creation_time,
+            last_modified=props.last_modified,
+        )
+        db.add(image_obj)
+        await db.commit()
+        await db.refresh(image_obj)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[job] Failed to insert Image row ({image_uuid}): {e}")
+        # Optionally, clean up the blob to avoid orphans:
+        try:
+            await blob_client.delete_blob()
+        except Exception:
+            pass
+        return
+
+    # Step 5: Load raw_bytes into numpy & run face detection
+    try:
+        pil_img = PILImage.open(BytesIO(raw_bytes)).convert("RGB")
+        img_np = np.array(pil_img)
+        boxes = face_recognition.face_locations(img_np, model="hog")
+        embeddings = face_recognition.face_encodings(img_np, boxes)
+    except Exception as e:
+        logger.error(f"[job] Face detection failed for '{image_uuid}': {e}")
+        return
+
+    face_count = len(embeddings)
+
+    # Step 6: Update Image.faces & insert Face rows
+    try:
+        image_obj.faces = face_count
+        db.add(image_obj)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[job] Could not update face count for '{image_uuid}': {e}")
+        # We’ll still try to insert individual Face rows
+
+    faces_to_add: List[Face] = []
+    for (top, right, bottom, left), emb in zip(boxes, embeddings):
+        bbox = {
+            "x": left,
+            "y": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
+        face = Face(
+            event_id=image_obj.event_id,
+            image_id=image_obj.id,
+            bbox=bbox,
+            embedding=emb.tolist(),
+            cluster_id=-2,
+        )
+        faces_to_add.append(face)
+        db.add(face)
+
+    try:
+        if faces_to_add:
+            await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[job] Could not insert Face rows for '{image_uuid}': {e}")
+        return
+
+    logger.info(f"[job] Completed processing for '{image_uuid}': {face_count} faces")
+
+
 # --------------------------------------------------------------------
 # DELETE IMAGE
 # --------------------------------------------------------------------
