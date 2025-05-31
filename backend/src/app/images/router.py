@@ -4,7 +4,9 @@ from typing import List, Optional
 from azure.storage.blob import ContainerClient
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
+    HTTPException,
     File,
     Path,
     Query,
@@ -25,6 +27,7 @@ from .service import (
     get_image_detail,
     get_images,
     upload_image,
+    process_faces,
 )
 
 router = APIRouter(prefix="/pics", tags=["images"])
@@ -136,12 +139,13 @@ async def get_one(
     summary="Upload an image, detect faces, store in Azure + DB",
 )
 async def upload(
+    background_tasks: BackgroundTasks,
     event_code: str = Path(
         ...,
         pattern=r"^[a-zA-Z0-9_]+$",
         description="Event code to associate with this image",
     ),
-    image: UploadFile = File(...),
+    image_file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
     container: ContainerClient = Depends(get_event_container),
 ) -> UploadImageResponse:
@@ -150,9 +154,10 @@ async def upload(
 
     Args:
         event_code (str): Unique event code to associate with the image.
-        image (UploadFile): Binary image file uploaded by the client.
+        image_file (UploadFile): Binary image file uploaded by the client.
         db (AsyncSession): SQLAlchemy async database session.
         container (ContainerClient): Azure Blob Storage container for the event.
+        background_tasks (BackgroundTasks): FastAPI background task manager.
 
     Returns:
         UploadImageResponse: Contains UUID, URL, face count, bounding boxes, and embeddings.
@@ -160,7 +165,37 @@ async def upload(
     Raises:
         HTTPException: If the file is not a valid image, face detection fails, or storage/DB operations fail.
     """
-    return await upload_image(db, container, event_code, image)
+    # 1) Call service to upload to Azure and log Image row (faces=0)
+    try:
+        image_obj, blob_name = await upload_image(
+            db=db,
+            container=container,
+            event_code=event_code,
+            upload_file=image_file,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Unexpected errors bubble up as 500
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # 2) Schedule face‐processing in the background
+    background_tasks.add_task(
+        process_faces,
+        db,
+        container,
+        image_obj.id,
+        blob_name,
+    )
+
+    # 3) Return an “empty” face response—actual face count, boxes, embeddings come later
+    return UploadImageResponse(
+        uuid=image_obj.uuid,
+        blob_url=image_obj.azure_blob_url,
+        faces=0,
+        boxes=[],
+        embeddings=[],
+    )
 
 
 # --------------------------------------------------------------------
