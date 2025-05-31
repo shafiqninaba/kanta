@@ -49,8 +49,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Ensure the installed binary is on the `PATH`
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH=/app/src:$PYTHONPATH
 
-
-CMD ["fastapi", "dev", "--host", "0.0.0.0", "src/app/main.py"]
+CMD ["fastapi", "run", "--host", "0.0.0.0", "src/app/main.py"]
 # CMD ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

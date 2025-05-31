@@ -1,9 +1,10 @@
 services:
   backend:
-    image: kanta.azurecr.io/backend:latest
+    image: kanta.azurecr.io/backend:latest 
     build:
       context: ./backend
       dockerfile: Dockerfile
+    platform: linux/amd64
     command: fastapi run src/app/main.py --host 0.0.0.0 --port 8000
     ports:
       - 8000:8000
@@ -42,7 +43,7 @@ services:
       - ./frontend/assets:/app/assets
     depends_on:
       backend:
-        condition: service_healthy #service_started
+        condition: service_healthy
         restart: true
     develop:
       watch:
