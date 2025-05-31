@@ -136,7 +136,7 @@ async def get_one(
 @router.post(
     "/{event_code}",
     response_model=UploadImageResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     summary="Upload an image, detect faces, store in Azure + DB",
 )
 async def upload(
@@ -179,7 +179,7 @@ async def upload(
     image_uuid = _uuid.uuid4().hex
 
     # 4) Enqueue the full job. Inside full_processing_job we will:
-    #      a) Upload to Azure
+    #      a) Upload to Azure blob storage
     #      b) Create/update the Image row in the DB
     #      c) Run face detection + insert Face rows
     background_tasks.add_task(
@@ -200,38 +200,6 @@ async def upload(
         boxes=[],
         embeddings=[],
     )
-
-    # # 1) Call service to upload to Azure and log Image row (faces=0)
-    # try:
-    #     image_obj, blob_name = await upload_image(
-    #         db=db,
-    #         container=container,
-    #         event_code=event_code,
-    #         upload_file=image_file,
-    #     )
-    # except HTTPException:
-    #     raise
-    # except Exception as e:
-    #     # Unexpected errors bubble up as 500
-    #     raise HTTPException(status_code=500, detail=str(e))
-
-    # # 2) Schedule face‐processing in the background
-    # background_tasks.add_task(
-    #     process_faces,
-    #     db,
-    #     container,
-    #     image_obj.id,
-    #     blob_name,
-    # )
-
-    # # 3) Return an “empty” face response—actual face count, boxes, embeddings come later
-    # return UploadImageResponse(
-    #     uuid=image_obj.uuid,
-    #     blob_url=image_obj.azure_blob_url,
-    #     faces=0,
-    #     boxes=[],
-    #     embeddings=[],
-    # )
 
 
 # --------------------------------------------------------------------
