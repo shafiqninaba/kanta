@@ -13,6 +13,7 @@ from PIL import Image as PILImage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from starlette.concurrency import run_in_threadpool
 
 from ..events.service import get_event
 from .models import Face, Image
@@ -347,16 +348,34 @@ async def process_faces(
         logger.error(f"[process_faces] Failed to download blob '{blob_name}': {exc}")
         return
 
-    # 2) Load into numpy & run face_recognition
-    try:
-        pil_image = PILImage.open(BytesIO(raw_bytes)).convert("RGB")
-        img_np = np.array(pil_image)
+    # # 2) Load into numpy & run face_recognition
+    # try:
+    #     pil_image = PILImage.open(BytesIO(raw_bytes)).convert("RGB")
+    #     img_np = np.array(pil_image)
+    #     boxes = face_recognition.face_locations(img_np, model="hog")
+    #     embeddings = face_recognition.face_encodings(img_np, boxes)
+    # except Exception as exc:
+    #     logger.error(
+    #         f"[process_faces] Face detection failed for blob '{blob_name}': {exc}"
+    #     )
+    #     return
+
+    # face_count = len(embeddings)
+
+    # Instead of calling face_recognition directly, do it in a thread:
+    def detect_faces_and_embeddings(data: bytes):
+        pil_img = PILImage.open(BytesIO(data)).convert("RGB")
+        img_np = np.array(pil_img)
         boxes = face_recognition.face_locations(img_np, model="hog")
-        embeddings = face_recognition.face_encodings(img_np, boxes)
-    except Exception as exc:
-        logger.error(
-            f"[process_faces] Face detection failed for blob '{blob_name}': {exc}"
+        embeds = face_recognition.face_encodings(img_np, boxes)
+        return boxes, embeds
+
+    try:
+        boxes, embeddings = await run_in_threadpool(
+            detect_faces_and_embeddings, raw_bytes
         )
+    except Exception as e:
+        logger.error(f"[job] Face detection failed for '{image_id}': {e}")
         return
 
     face_count = len(embeddings)
@@ -536,6 +555,128 @@ async def full_processing_job(
         await db.rollback()
         logger.error(f"[job] Could not insert Face rows for '{image_uuid}': {e}")
         return
+
+    logger.info(f"[job] Completed processing for '{image_uuid}': {face_count} faces")
+
+
+from fastapi.concurrency import run_in_threadpool
+import asyncio
+
+
+async def full_processing_job(
+    db: AsyncSession,
+    container: ContainerClient,
+    event_code: str,
+    image_uuid: str,
+    raw_bytes: bytes,
+    original_filename: str,
+) -> None:
+    # Step 1: Ensure event exists
+    event = await get_event(db, event_code)
+    if not event:
+        logger.error(f"[job] Event '{event_code}' not found.")
+        return
+
+    # Step 2: Determine extension & blob_name
+    ext = (
+        original_filename.rsplit(".", 1)[-1].lower()
+        if "." in original_filename
+        else "png"
+    )
+    if ext not in {"jpg", "jpeg", "png", "bmp", "gif", "tiff"}:
+        ext = "png"
+    blob_name = f"images/{image_uuid}.{ext}"
+
+    # Step 3: Upload raw_bytes to Azure—but the async ContainerClient.upload_blob() is already async.
+    # If you were accidentally using a sync upload_blob, wrap it in run_in_threadpool:
+    try:
+        # Suppose `container` is an **async** ContainerClient, so this is truly non‐blocking:
+        await container.upload_blob(
+            name=blob_name,
+            data=raw_bytes,
+            overwrite=True,
+            metadata={"event_code": event_code, "uuid": image_uuid},
+        )
+        blob_client = container.get_blob_client(blob_name)
+        props = await blob_client.get_blob_properties()
+        final_url = f"{container.url}/{blob_name}"
+    except Exception as e:
+        logger.error(f"[job] Azure upload failed for '{image_uuid}': {e}")
+        return
+
+    # Step 4: Insert or update the Image row (async DB)
+    try:
+        image_obj = Image(
+            event_id=event.id,
+            uuid=image_uuid,
+            azure_blob_url=final_url,
+            file_extension=ext,
+            faces=0,
+            created_at=props.creation_time,
+            last_modified=props.last_modified,
+        )
+        db.add(image_obj)
+        await db.commit()
+        await db.refresh(image_obj)
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"[job] Failed to insert Image row ({image_uuid}): {e}")
+        try:
+            await blob_client.delete_blob()
+        except:
+            pass
+        return
+
+    # Step 5: Run face detection on raw_bytes → THIS is CPU‐heavy
+    def do_face_recognition(data: bytes):
+        """All CPU‐bound/​blocking code must go in here."""
+        pil_img = PILImage.open(BytesIO(data)).convert("RGB")
+        img_np = np.array(pil_img)
+        boxes = face_recognition.face_locations(img_np, model="hog")
+        embeddings = face_recognition.face_encodings(img_np, boxes)
+        return boxes, embeddings
+
+    try:
+        # This line moves `do_face_recognition` into a threadpool,
+        # so the event loop is free while face_recognition runs.
+        boxes, embeddings = await run_in_threadpool(do_face_recognition, raw_bytes)
+    except Exception as e:
+        logger.error(f"[job] Face detection failed for '{image_uuid}': {e}")
+        return
+
+    face_count = len(embeddings)
+
+    # Step 6: Update faces count & insert Face rows (async DB)
+    try:
+        image_obj.faces = face_count
+        db.add(image_obj)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.error(f"[job] Could not update face count for '{image_uuid}'")
+
+    for (top, right, bottom, left), emb in zip(boxes, embeddings):
+        bbox = {
+            "x": left,
+            "y": top,
+            "width": right - left,
+            "height": bottom - top,
+        }
+        face = Face(
+            event_id=image_obj.event_id,
+            image_id=image_obj.id,
+            bbox=bbox,
+            embedding=emb.tolist(),
+            cluster_id=-2,
+        )
+        db.add(face)
+
+    try:
+        if boxes:
+            await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.error(f"[job] Could not insert Face rows for '{image_uuid}'")
 
     logger.info(f"[job] Completed processing for '{image_uuid}': {face_count} faces")
 
