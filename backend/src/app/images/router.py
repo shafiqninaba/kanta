@@ -27,8 +27,6 @@ from .service import (
     full_processing_job,
     get_image_detail,
     get_images,
-    process_faces,
-    upload_image,
 )
 
 router = APIRouter(prefix="/pics", tags=["images"])
