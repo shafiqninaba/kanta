@@ -148,13 +148,13 @@ async def _generate_and_upload_qr(
     # 2) Ensure container exists
     container = blob_service.get_container_client(event_code)
     try:
-        container.create_container(public_access="blob")
+        await container.create_container(public_access="blob")
     except ResourceExistsError:
         pass
 
     # 3) Upload the QR under `assets/qr.png`
     asset_path = "assets/qr.png"
-    container.upload_blob(
+    await container.upload_blob(
         name=asset_path,
         data=qr_bytes,
         overwrite=True,
@@ -234,7 +234,7 @@ async def update_event(
 
         # 5a) Create the new container
         try:
-            blob_service.create_container(new_container, public_access="blob")
+            await blob_service.create_container(new_container, public_access="blob")
         except ResourceExistsError:
             pass
 
@@ -270,7 +270,7 @@ async def update_event(
         # Upload the new QR code image to the new container
         container = blob_service.get_container_client(payload.new_event_code)
         asset_path = "assets/qr.png"
-        container.upload_blob(
+        await container.upload_blob(
             name=asset_path,
             data=qr_bytes,
             overwrite=True,
@@ -312,7 +312,7 @@ async def upsert_event_image(
     blob_path = f"assets/event_image.{ext}"
 
     # upload to Azure
-    container.upload_blob(
+    await container.upload_blob(
         name=blob_path,
         data=raw,
         overwrite=True,

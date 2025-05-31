@@ -6,8 +6,8 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
-    HTTPException,
     File,
+    HTTPException,
     Path,
     Query,
     UploadFile,
@@ -24,11 +24,11 @@ from .schemas import (
 )
 from .service import (
     delete_image,
+    full_processing_job,
     get_image_detail,
     get_images,
-    upload_image,
     process_faces,
-    full_processing_job,
+    upload_image,
 )
 
 router = APIRouter(prefix="/pics", tags=["images"])

@@ -1,5 +1,7 @@
+import asyncio
 import json
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
@@ -8,6 +10,7 @@ import face_recognition
 import numpy as np
 from azure.storage.blob import ContainerClient
 from fastapi import HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from loguru import logger
 from PIL import Image as PILImage
 from sqlalchemy import select
@@ -23,6 +26,9 @@ from .schemas import (
     ImageListItem,
     UploadImageResponse,
 )
+
+# Create a global ProcessPoolExecutor, perhaps with 4 worker processes
+_process_pool = ProcessPoolExecutor(max_workers=4)
 
 
 # --------------------------------------------------------------------
@@ -348,6 +354,7 @@ async def process_faces(
         logger.error(f"[process_faces] Failed to download blob '{blob_name}': {exc}")
         return
 
+    # This was CPU bounded initially, but now we try to use a thread pool executor
     # # 2) Load into numpy & run face_recognition
     # try:
     #     pil_image = PILImage.open(BytesIO(raw_bytes)).convert("RGB")
@@ -363,6 +370,7 @@ async def process_faces(
     # face_count = len(embeddings)
 
     # Instead of calling face_recognition directly, do it in a thread:
+    # For some reason, we got a segmentation fault. Backend service just exited, code 139.
     def detect_faces_and_embeddings(data: bytes):
         pil_img = PILImage.open(BytesIO(data)).convert("RGB")
         img_np = np.array(pil_img)
@@ -430,6 +438,10 @@ async def process_faces(
     )
 
 
+# Ren Hwa: wanted to offload the entire processing job to ONE function and have it execute in a background task.
+# However, was still getting blocked. Could not make other requests to the fastapi server while this job was running.
+# Apparantely, Background tasks run on the same asyncio event loop as your foreground tasks. It's not multi-threading or multi-processing!
+# So if our background task is CPU-bound, it will block the event loop.
 async def full_processing_job(
     db: AsyncSession,
     container: ContainerClient,
@@ -559,22 +571,42 @@ async def full_processing_job(
     logger.info(f"[job] Completed processing for '{image_uuid}': {face_count} faces")
 
 
-from fastapi.concurrency import run_in_threadpool
-import asyncio
+def do_face_recognition(image_data: bytes):
+    """
+    Top‐level helper for face detection & embedding.
+    Since it's at module scope, it can be pickled and sent to a ProcessPool.
+    """
+    pil_img = PILImage.open(BytesIO(image_data)).convert("RGB")
+    arr = np.array(pil_img)
+    boxes = face_recognition.face_locations(arr, model="hog")
+    embs = face_recognition.face_encodings(arr, boxes)
+    return boxes, embs
 
 
 async def full_processing_job(
     db: AsyncSession,
-    container: ContainerClient,
+    container: ContainerClient,  # <-- async ContainerClient now
     event_code: str,
     image_uuid: str,
     raw_bytes: bytes,
     original_filename: str,
 ) -> None:
-    # Step 1: Ensure event exists
-    event = await get_event(db, event_code)
-    if not event:
-        logger.error(f"[job] Event '{event_code}' not found.")
+    """
+    1) Ensure event exists (async DB).
+    2) Async‐upload raw_bytes to Azure.
+    3) Async‐insert/update Image row (faces=0).
+    4) Offload CPU‐heavy face detection into thread.
+    5) Async‐update face count and insert Face rows.
+    """
+
+    # Step 1: Ensure event exists in the DB
+    try:
+        event = await get_event(db, event_code)
+        if not event:
+            logger.error(f"[job] Event '{event_code}' not found. Aborting.")
+            return
+    except Exception as e:
+        logger.error(f"[job] Error fetching event '{event_code}': {e}")
         return
 
     # Step 2: Determine extension & blob_name
@@ -587,16 +619,17 @@ async def full_processing_job(
         ext = "png"
     blob_name = f"images/{image_uuid}.{ext}"
 
-    # Step 3: Upload raw_bytes to Azure—but the async ContainerClient.upload_blob() is already async.
-    # If you were accidentally using a sync upload_blob, wrap it in run_in_threadpool:
+    # Step 3: Upload raw_bytes to Azure (async!)
     try:
-        # Suppose `container` is an **async** ContainerClient, so this is truly non‐blocking:
+        # Because `container` is the async client, this is non‐blocking.
         await container.upload_blob(
             name=blob_name,
             data=raw_bytes,
             overwrite=True,
             metadata={"event_code": event_code, "uuid": image_uuid},
         )
+
+        # Get the async BlobClient; its methods are also awaitable:
         blob_client = container.get_blob_client(blob_name)
         props = await blob_client.get_blob_properties()
         final_url = f"{container.url}/{blob_name}"
@@ -604,7 +637,7 @@ async def full_processing_job(
         logger.error(f"[job] Azure upload failed for '{image_uuid}': {e}")
         return
 
-    # Step 4: Insert or update the Image row (async DB)
+    # Step 4: Insert/update Image row in database (async)
     try:
         image_obj = Image(
             event_id=event.id,
@@ -621,32 +654,45 @@ async def full_processing_job(
     except Exception as e:
         await db.rollback()
         logger.error(f"[job] Failed to insert Image row ({image_uuid}): {e}")
+        # Clean up the uploaded blob if DB insert fails
         try:
             await blob_client.delete_blob()
         except:
             pass
         return
 
-    # Step 5: Run face detection on raw_bytes → THIS is CPU‐heavy
-    def do_face_recognition(data: bytes):
-        """All CPU‐bound/​blocking code must go in here."""
-        pil_img = PILImage.open(BytesIO(data)).convert("RGB")
-        img_np = np.array(pil_img)
-        boxes = face_recognition.face_locations(img_np, model="hog")
-        embeddings = face_recognition.face_encodings(img_np, boxes)
-        return boxes, embeddings
+    loop = asyncio.get_running_loop()
 
     try:
-        # This line moves `do_face_recognition` into a threadpool,
-        # so the event loop is free while face_recognition runs.
-        boxes, embeddings = await run_in_threadpool(do_face_recognition, raw_bytes)
+        boxes, embeddings = await loop.run_in_executor(
+            _process_pool, do_face_recognition, raw_bytes
+        )
     except Exception as e:
-        logger.error(f"[job] Face detection failed for '{image_uuid}': {e}")
+        logger.error(f"[job] Face detection (process) failed for '{image_uuid}': {e}")
         return
 
     face_count = len(embeddings)
 
-    # Step 6: Update faces count & insert Face rows (async DB)
+    # # Step 5: CPU‐heavy face detection → offload to threadpool
+    # def do_face_recognition(image_data: bytes):
+    #     """
+    #     All CPU‐bound / blocking code goes here.
+    #     """
+    #     pil_img = PILImage.open(BytesIO(image_data)).convert("RGB")
+    #     arr = np.array(pil_img)
+    #     boxes = face_recognition.face_locations(arr, model="hog")
+    #     embs = face_recognition.face_encodings(arr, boxes)
+    #     return boxes, embs
+
+    # try:
+    #     boxes, embeddings = await run_in_threadpool(do_face_recognition, raw_bytes)
+    # except Exception as e:
+    #     logger.error(f"[job] Face detection failed for '{image_uuid}': {e}")
+    #     return
+
+    # face_count = len(embeddings)
+
+    # Step 6: Update `faces` count and insert Face rows (async)
     try:
         image_obj.faces = face_count
         db.add(image_obj)
@@ -655,6 +701,7 @@ async def full_processing_job(
         await db.rollback()
         logger.error(f"[job] Could not update face count for '{image_uuid}'")
 
+    # Insert one Face record per detected face
     for (top, right, bottom, left), emb in zip(boxes, embeddings):
         bbox = {
             "x": left,
