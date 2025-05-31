@@ -249,7 +249,7 @@ async def update_event(
 
         # 5c) Delete the old container
         try:
-            blob_service.delete_container(old_container)
+            await blob_service.delete_container(old_container)
         except ResourceNotFoundError:
             pass
 
@@ -354,7 +354,7 @@ async def delete_event(
     # Delete the Azure Blob Storage container for this event
     container_name = code.lower()
     try:
-        blob_service.delete_container(container_name)
+        await blob_service.delete_container(container_name)
     except ResourceNotFoundError:
         # if the container did not exist, ignore
         pass

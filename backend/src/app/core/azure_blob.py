@@ -53,8 +53,7 @@ def get_blob_service() -> BlobServiceClient:
     return _blob_client
 
 
-# apparantely LRU cache makes asynchronous calls fail, but it doesn't seem to be that way
-@lru_cache(maxsize=128)
+# apparantely LRU cache makes asynchronous calls fail and returns a sync client
 async def get_event_container(
     event_code: str = Path(
         ...,
@@ -74,5 +73,5 @@ async def get_event_container(
         await container.create_container(public_access="blob")  # public access to blobs
         logger.info(f"Created new container: {container_name}")
     except ResourceExistsError:
-        logger.debug(f"Container already exists: {container_name}")
+        pass
     return container
