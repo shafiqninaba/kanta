@@ -1,5 +1,6 @@
 services:
   backend:
+    image: kanta.azurecr.io/backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -9,11 +10,11 @@ services:
     env_file:
       - .env      
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/system/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/system/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 40s
     environment:
       - UV_COMPILE_BYTECODE=1
       - UV_LINK_MODE=copy
@@ -26,14 +27,14 @@ services:
           target: /app/src/app
 
   frontend:
+    image: kanta.azurecr.io/frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    platform: linux/amd64
     command: [uv, run, streamlit, run, Home.py]
     ports:
       - 8501:8501
-    env_file:
-      - .env
     environment:
       - STREAMLIT_SERVER_PORT=8501
       - BACKEND_SERVER_URL=http://backend:8000/api/v1
@@ -41,7 +42,7 @@ services:
       - ./frontend/assets:/app/assets
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_healthy #service_started
         restart: true
     develop:
       watch:
