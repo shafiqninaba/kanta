@@ -1,4 +1,5 @@
 import io
+import re
 from datetime import date, datetime
 from datetime import time as t
 
@@ -14,6 +15,9 @@ from utils.session import get_event_selection, init_session_state
 
 # Page Configuration
 st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="wide")
+AZURE_CONTAINER_NAME_REGEX = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{1,61}[a-z0-9])?$")
+MIN_LEN = 3
+MAX_LEN = 63
 
 
 def main() -> None:
@@ -171,7 +175,7 @@ def main() -> None:
     with tab_create:
         st.header("Create New Event")
         with st.form("create_form"):
-            code = st.text_input("Event Code")
+            code = st.text_input("Event Code").strip()
             name = st.text_input("Event Name")
             desc = st.text_area("Description")
             cols = st.columns(4)
@@ -180,8 +184,18 @@ def main() -> None:
             d1 = cols[2].date_input("End Date", value=date.today())
             t1 = cols[3].time_input("End Time", value=t(17, 0), step=1800)
             if st.form_submit_button("Create Event"):
-                if not code.strip():
+                if not code:
                     st.error("Event Code is required.")
+                elif len(code) < MIN_LEN or len(code) > MAX_LEN:
+                    st.error(
+                        f"Event Code must be between {MIN_LEN} and {MAX_LEN} characters."
+                    )
+                elif not AZURE_CONTAINER_NAME_REGEX.match(code):
+                    st.error(
+                        "Invalid Event Code. "
+                        "Must consist of lowercase letters, numbers, and single hyphens, "
+                        "cannot begin or end with a hyphen, and cannot have consecutive hyphens."
+                    )
                 else:
                     try:
                         new = create_event(
