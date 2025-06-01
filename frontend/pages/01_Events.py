@@ -52,6 +52,7 @@ def main() -> None:
                 "Select or create an event first to view or edit existing events."
             )
         else:
+            st.caption("View and edit your current event details below.")
             code = ss.event_code
             event = get_events(event_code=ss.event_code)[0]
 
@@ -220,6 +221,7 @@ def main() -> None:
     # --------------------------------------------------------------------
     with tab_create:
         st.subheader("Create New Event")
+        st.caption("_Create a new event to start collecting photos and memories!_")
         with st.form("create_form"):
             code = st.text_input(
                 "Event Code",
