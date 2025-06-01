@@ -10,7 +10,7 @@ from io import BytesIO
 from typing import List
 
 import streamlit as st
-from utils.api import get_image_detail, get_images
+from utils.api import get_image_detail, get_images, delete_image
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
@@ -18,7 +18,7 @@ from utils.session import get_event_selection, init_session_state
 st.set_page_config(page_title="Image Gallery", page_icon="🖼️", layout="wide")
 
 # Constants
-IMAGES_PER_PAGE_OPTIONS: List[int] = [10, 20, 30, 50, 100]
+IMAGES_PER_PAGE_OPTIONS: List[int] = [10, 20, 30, 40, 50, 100]
 DEFAULT_IMAGES_PER_PAGE: int = 20
 NUM_GRID_COLS: int = 5
 THUMBNAIL_ASPECT_PADDING: str = "100%"
@@ -45,12 +45,12 @@ ss.setdefault("gallery_filter_clusters", None)
 ss.setdefault("gallery_face_selections", {})
 
 # Page Title
-st.title("Gallery")
+st.title("Image Gallery")
 st.markdown("View, filter, and download images from your event.")
 active_clusters = ss.gallery_filter_clusters
 if active_clusters:
     ids = ", ".join(map(str, sorted(set(active_clusters))))
-    st.info(f"ℹ️ Showing images for persons: {ids}.")
+    st.info(f"ℹShowing images for persons: {ids}.")
 
 # Check if an event is selected
 if not ss.get("event_code"):
@@ -60,24 +60,60 @@ if not ss.get("event_code"):
 # --------------------------------------------------------------------
 # Filter Bar: Date, Face Count, Pagination, and Actions
 # --------------------------------------------------------------------
-st.markdown("#### Filter Images")
-filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 1.5])  # Renamed to filter_cols
+st.subheader("Filters")
+filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 1.5])
 
 # Date filters
-date_from = filter_cols[0].date_input("From", ss.gallery_date_from)
-date_to = filter_cols[1].date_input("To", ss.gallery_date_to)
+date_from = filter_cols[0].date_input(
+    "From", ss.gallery_date_from, help="Select start date for filtering images."
+)
+date_to = filter_cols[1].date_input(
+    "To", ss.gallery_date_to, help="Select end date for filtering images."
+)
+
+
+# Callback: if min > max, push max up to match
+def _sync_max_to_min():
+    if st.session_state.gallery_min_faces > st.session_state.gallery_max_faces:
+        st.session_state.gallery_max_faces = st.session_state.gallery_min_faces
+
+
+# Callback: if max < min, pull min down to match
+def _sync_min_to_max():
+    if st.session_state.gallery_max_faces < st.session_state.gallery_min_faces:
+        st.session_state.gallery_min_faces = st.session_state.gallery_max_faces
+
+
 # Face count filters
-min_faces = filter_cols[2].number_input("Min", min_value=0, value=ss.gallery_min_faces)
-max_faces = filter_cols[3].number_input("Max", min_value=0, value=ss.gallery_max_faces)
+min_faces = filter_cols[2].number_input(
+    "Min",
+    min_value=0,
+    key="gallery_min_faces",
+    on_change=_sync_max_to_min,
+    help="Minimum number of faces in the image.",
+)
+max_faces = filter_cols[3].number_input(
+    "Max",
+    min_value=0,
+    key="gallery_max_faces",
+    on_change=_sync_min_to_max,
+    help="Maximum number of faces in the image.",
+)
+
 # Pagination filters
 limit = filter_cols[4].selectbox(
     "Limit",
     IMAGES_PER_PAGE_OPTIONS,
     index=IMAGES_PER_PAGE_OPTIONS.index(ss.gallery_limit),
     key="gallery_filter_limit",
+    help="Number of images to display per page.",
 )
 page = filter_cols[5].number_input(
-    "Page", min_value=1, value=ss.gallery_page, key="gallery_filter_page"
+    "Page",
+    min_value=1,
+    value=ss.gallery_page,
+    key="gallery_filter_page",
+    help="Page number to display.",
 )
 
 # Clear people filter or placeholder
@@ -212,6 +248,9 @@ def image_detail_popover(image_uuid: str) -> None:
     """
     Display detailed view and face-selection for a given image UUID.
     get_image_detail and fetch_image_bytes_from_url are now cached.
+
+    Args:
+        image_uuid (str): The UUID of the image to display details for.
     """
     details = get_image_detail(image_uuid)
     if not details:
@@ -228,6 +267,7 @@ def image_detail_popover(image_uuid: str) -> None:
             st.caption(dt.strftime("%b %d, %Y %H:%M"))
         except Exception:
             st.caption(created)
+
     st.caption(f"Faces: {len(faces)} | Type: {info.get('file_extension','').upper()}")
 
     if not faces:
