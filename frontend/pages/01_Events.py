@@ -1,4 +1,5 @@
 import io
+import os
 import re
 from datetime import date, datetime
 from datetime import time as t
@@ -10,6 +11,7 @@ from utils.api import (
     get_events,
     update_event,
     upload_event_image,
+    delete_event,
 )
 from utils.session import get_event_selection, init_session_state
 
@@ -20,6 +22,7 @@ st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="center
 AZURE_CONTAINER_NAME_REGEX = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{1,61}[a-z0-9])?$")
 MIN_LEN = 3
 MAX_LEN = 63
+ADMIN_PW = os.getenv("admin_password", "Reallysecurepassword123")
 
 
 def main() -> None:
@@ -36,7 +39,9 @@ def main() -> None:
     st.title("Events")
     st.markdown("Manage your events and maintain a collaborative photo album.")
 
-    tab_current, tab_create = st.tabs(["Current Event", "Create New Event"])
+    tab_current, tab_create, tab_delete = st.tabs(
+        ["Current Event", "Create New Event", "Delete Event"]
+    )
 
     # --------------------------------------------------------------------
     # Current Event Tab
@@ -337,6 +342,103 @@ def main() -> None:
 
             # Reset just_created flag
             ss.just_created = False
+
+    # --------------------------------------------------------------------
+    # Delete Event Tab
+    # --------------------------------------------------------------------
+    with tab_delete:
+        st.subheader("Delete Event")
+        st.markdown(
+            "Select an event to delete. **Warning:** This will delete all images, and this action is irreversible!"
+        )
+
+        # Fetch all events to populate the selectbox
+        try:
+            all_events = get_events()
+        except Exception as e:
+            st.error(f"Could not retrieve events: {e}")
+            all_events = []
+
+        if not all_events:
+            st.info("No events available to delete.")
+        else:
+            # Build a mapping from display label to event code
+            event_options = {
+                f"{evt.get('name', evt['code'])} ({evt['code']})": evt["code"]
+                for evt in all_events
+            }
+            display_labels = list(event_options.keys())
+
+            selected_label = st.selectbox(
+                "Select Event to Delete",
+                options=display_labels,
+                help="Choose the event you want to remove permanently.",
+            )
+            selected_code = event_options[selected_label]
+
+            ss.setdefault("show_delete_confirmation", False)
+
+            # Stage 1: Show “Delete Event” button
+            if not ss.show_delete_confirmation:
+                if st.button("Delete Event", use_container_width=True):
+                    ss.show_delete_confirmation = True
+
+            # Stage 2: Show confirmation inputs once “Delete Event” is clicked
+            if ss.show_delete_confirmation:
+                st.divider()
+                st.warning(
+                    "You’re about to permanently delete "
+                    f"the event **{selected_label}**. "
+                    "This cannot be undone."
+                )
+
+                with st.form("confirm_delete_form"):
+                    pwd = st.text_input(
+                        "Administrator Password",
+                        type="password",
+                        help="Administrator password is required to delete an event.",
+                    )
+                    confirm_code = st.text_input(
+                        "Type Event Code to Confirm",
+                        placeholder=selected_code,
+                        help="Re-enter the event code exactly to confirm deletion.",
+                    )
+                    confirm_button = st.form_submit_button("Confirm Deletion")
+
+                    if confirm_button:
+                        ADMIN_PW = os.getenv(
+                            "admin_password", "Reallysecurepassword123"
+                        )
+
+                        if pwd != ADMIN_PW:
+                            st.error("Incorrect administrator password.")
+                        elif confirm_code.strip() != selected_code:
+                            st.error("Event code does not match. Deletion cancelled.")
+                        else:
+                            # Proceed with deletion
+                            try:
+                                delete_event(event_code=selected_code)
+                            except requests.HTTPError as err:
+                                detail = err.response.text or str(err)
+                                st.error(
+                                    f"Deletion failed ({err.response.status_code}): {detail}"
+                                )
+                            except Exception as e:
+                                st.error(f"Unexpected error: {e}")
+                                st.stop()
+
+                            # On success:
+                            st.toast(f"Event **{selected_label}** deleted.", icon="✅")
+
+                            # Clear current selection if it matches the deleted event
+                            if ss.get("event_code") == selected_code:
+                                ss.event_code = None
+
+                            # Reset confirmation flag so the form hides again
+                            ss.show_delete_confirmation = False
+
+                            # Optionally, refetch events so the selectbox updates next time
+                            # (Streamlit reruns on any interaction; no explicit rerun needed)
 
 
 if __name__ == "__main__":
