@@ -22,7 +22,7 @@ st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="center
 AZURE_CONTAINER_NAME_REGEX = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{1,61}[a-z0-9])?$")
 MIN_LEN = 3
 MAX_LEN = 63
-ADMIN_PW = os.getenv("admin_password", "Reallysecurepassword123")
+ADMIN_PW = os.getenv("admin_password", "password123")
 
 
 def main() -> None:

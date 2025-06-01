@@ -250,25 +250,20 @@ def upload_image(event_code: str, image_file: Any) -> Dict[str, Any]:
     return response.json()
 
 
-def delete_image(image_uuid: str) -> Dict[str, Any]:
+def delete_image(event_code: str, image_uuid: str) -> None:
     """
     Delete an image by its UUID.
 
     Args:
         image_uuid: The UUID of the image to delete.
 
-    Returns:
-        API response as a dictionary.
-
     Raises:
         HTTPError: If the API returns a non-204 status.
     """
-    url = f"{IMAGE_URL}/{image_uuid}"
+    url = f"{IMAGE_URL}/{event_code}/{image_uuid}"
 
     response = requests.delete(url, timeout=10)
     response.raise_for_status()
-
-    return response.json()
 
 
 # --------------------------------------------------------------------
