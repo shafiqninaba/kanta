@@ -315,7 +315,7 @@ def main() -> None:
             qr_url = new_event.get("qr_code_image_url")
             if qr_url:
                 st.subheader("Event QR Code")
-                st.divider(divider="violet")
+                st.divider(divider="rainbow")
 
                 qr_data = None
                 try:

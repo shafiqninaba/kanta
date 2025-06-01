@@ -6,6 +6,7 @@ st.set_page_config(
     page_title="Kanta | Collaborative Event Photos",
     page_icon="📸",
     layout="centered",
+    initial_sidebar_state="expanded",
 )
 
 
@@ -43,7 +44,7 @@ def main():
     with col_txt1:
         st.subheader(
             "1. Create Event & QR Code",
-            divider="rainbow",
+            divider="violet",
         )
         st.write(
             "Set up your event and generate a custom QR code guests can scan to join instantly."
@@ -90,7 +91,7 @@ def main():
             caption="All your photos in one album",
         )
     with col_txt3:
-        st.subheader("3. Explore Your Gallery", divider="green")
+        st.subheader("3. Explore Your Gallery", divider="red")
         st.write(
             "Browse all event photos in one place, filter by date or person, and mark your favorites."
         )

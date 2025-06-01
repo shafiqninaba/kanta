@@ -11,11 +11,7 @@ from io import BytesIO
 from typing import List
 
 import streamlit as st
-from utils.api import (
-    get_image_detail,
-    get_images,
-    delete_image,
-)
+from utils.api import get_image_detail, get_images, delete_image
 from utils.image import crop_and_encode_face, fetch_image_bytes_from_url
 from utils.session import get_event_selection, init_session_state
 
@@ -52,8 +48,52 @@ ss.setdefault("gallery_download_filename", None)
 ss.setdefault("gallery_download_mime", None)
 ss.setdefault("gallery_filter_clusters", None)  # list[int] or None
 ss.setdefault("gallery_face_selections", {})  # for popover face checkboxes
-ss.setdefault("gallery_show_delete_form", False)  # inline delete form flag
-ss.setdefault("gallery_delete_pwd", "")  # inline password input
+ss.setdefault("gallery_show_delete_dialog", False)  # dialog flag
+ss.setdefault("gallery_prev_count", 0)  # track previous selection count
+
+
+# --------------------------------------------------------------------
+# Dialog for deletion
+# --------------------------------------------------------------------
+@st.dialog("Confirm Delete", width="small")
+def confirm_delete_dialog():
+    """
+    Modal dialog to confirm deletion of selected images.
+    """
+    selected = list(ss.gallery_selected_images.keys())
+    count = len(selected)
+    st.warning(
+        f"You're about to permanently delete {count} image(s). This cannot be undone."
+    )
+    pwd = st.text_input(
+        "Administrator Password",
+        type="password",
+        key="delete_pwd_input_dialog",
+        help="Enter the admin password to proceed.",
+    )
+    if st.button("Confirm", key="confirm_delete_dialog"):
+        if pwd != ADMIN_PW:
+            st.error("Incorrect administrator password.")
+        else:
+            deleted_any = False
+            errors = []
+            for uuid in selected:
+                try:
+                    delete_image(event_code=ss.event_code, image_uuid=uuid)
+                    deleted_any = True
+                    ss.gallery_selected_images.pop(uuid, None)
+                except Exception as e:
+                    errors.append(f"- {uuid}: {e}")
+            if deleted_any:
+                st.toast(f"Deleted {count} image(s).", icon="✅")
+            if errors:
+                st.error("Some errors occurred:\n" + "\n".join(errors))
+            ss.gallery_show_delete_dialog = False
+            st.rerun()
+    if st.button("Cancel", key="cancel_delete_dialog"):
+        ss.gallery_show_delete_dialog = False
+        st.rerun()
+
 
 # Page Title
 st.title("Image Gallery")
@@ -72,7 +112,7 @@ if not ss.get("event_code"):
 # Filter Bar: Date, Face Count, Pagination, and Actions
 # --------------------------------------------------------------------
 st.subheader("Filters")
-filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1, 2])
+filter_cols = st.columns([1.5, 1.5, 1, 1, 1, 1, 1])
 
 # 1) Date filters
 date_from = filter_cols[0].date_input(
@@ -141,33 +181,6 @@ if active_clusters:
 else:
     action_col.markdown("<div style='height:38px'></div>", unsafe_allow_html=True)
 
-# 5) Download / Delete buttons go into filter_cols[7]
-download_delete_col = filter_cols[7]
-selected_count = len(ss.gallery_selected_images)
-btn_dl, btn_del = download_delete_col.columns([1, 1], gap="small")
-
-# “Download Selected” button
-if btn_dl.button(
-    "Download Selected",
-    key="gallery_btn_prep_download_filter",
-    type="primary" if selected_count >= 1 else "secondary",
-    disabled=(selected_count == 0),
-    use_container_width=True,
-):
-    ss.gallery_prepare_download = True
-    st.rerun()
-
-# “Delete Selected” button (shows inline password form)
-if btn_del.button(
-    "Delete Selected",
-    key="gallery_btn_show_delete_filter",
-    type="primary" if selected_count >= 1 else "secondary",
-    disabled=(selected_count == 0),
-    use_container_width=True,
-):
-    ss.gallery_show_delete_form = True
-    st.rerun()
-
 # Update session state if any filter value changed
 filters_changed = False
 for var, new in [
@@ -194,6 +207,37 @@ if isinstance(current_cluster_filter, list):
     cluster_list_id_for_api = tuple(sorted(set(current_cluster_filter)))
 else:
     cluster_list_id_for_api = None
+
+# --------------------------------------------------------------------
+# Download and Delete buttons directly below the filter bar
+# --------------------------------------------------------------------
+selected_count = len(ss.gallery_selected_images)
+
+dl_col, del_col = st.columns([1, 1], gap="small")
+
+# "Download Selected" button (always enabled)
+if dl_col.button(
+    "Download Selected",
+    key="gallery_btn_prep_download_filter",
+    type="primary",
+    use_container_width=True,
+):
+    ss.gallery_prepare_download = True
+    st.rerun()
+
+# "Delete Selected" button (opens modal dialog)
+if del_col.button(
+    "Delete Selected",
+    key="gallery_btn_show_delete_filter",
+    type="primary",
+    use_container_width=True,
+):
+    if selected_count > 0:
+        ss.gallery_show_delete_dialog = True
+        ss.gallery_prev_count = selected_count
+        st.rerun()
+
+st.markdown("---")
 
 # --------------------------------------------------------------------
 # Download Preparation Logic
@@ -253,48 +297,11 @@ if ss.gallery_download_data:
         ),
     )
 
+# If deletion dialog is flagged, show it
+if ss.gallery_show_delete_dialog:
+    confirm_delete_dialog()
+
 st.markdown("---")
-
-# --------------------------------------------------------------------
-# Inline Delete Form (no modal, just warning + password field)
-# --------------------------------------------------------------------
-if ss.gallery_show_delete_form:
-    st.warning(
-        f"You’re about to permanently delete {selected_count} image(s). This cannot be undone."
-    )
-    ss.gallery_delete_pwd = st.text_input(
-        "Administrator Password",
-        type="password",
-        key="delete_pwd_input",
-        help="Enter the admin password to proceed.",
-    )
-    confirm_inline = st.button("Confirm Delete", key="confirm_inline_delete")
-    cancel_inline = st.button("Cancel", key="cancel_inline")
-
-    if cancel_inline:
-        ss.gallery_show_delete_form = False
-        st.rerun()
-
-    if confirm_inline:
-        if ss.gallery_delete_pwd != ADMIN_PW:
-            st.error("Incorrect administrator password.")
-        else:
-            deleted_any = False
-            errors = []
-            for uuid in list(ss.gallery_selected_images.keys()):
-                try:
-                    delete_image(event_code=ss.event_code, image_uuid=uuid)
-                    deleted_any = True
-                    ss.gallery_selected_images.pop(uuid, None)
-                except Exception as e:
-                    errors.append(f"- {uuid}: {e}")
-                    st.write(f"Error deleting {uuid}: {e}")
-            if deleted_any:
-                st.toast(f"Deleted {selected_count} image(s).", icon="✅")
-            if errors:
-                st.error("Some errors occurred:\n" + "\n".join(errors))
-            ss.gallery_show_delete_form = False
-            st.rerun()
 
 
 # --------------------------------------------------------------------
@@ -489,10 +496,15 @@ else:
                 new = st.checkbox(
                     "sel", value=sel, key=sel_key, label_visibility="collapsed"
                 )
-                if new:
-                    ss.gallery_selected_images[img["uuid"]] = img["azure_blob_url"]
-                elif sel:
-                    ss.gallery_selected_images.pop(img["uuid"], None)
+                if new != sel:
+                    # Reset dialog flag when selection changes
+                    if ss.gallery_show_delete_dialog:
+                        ss.gallery_show_delete_dialog = False
+
+                    if new:
+                        ss.gallery_selected_images[img["uuid"]] = img["azure_blob_url"]
+                    else:
+                        ss.gallery_selected_images.pop(img["uuid"], None)
 
 # --------------------------------------------------------------------
 # Custom CSS
