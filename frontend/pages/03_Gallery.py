@@ -71,28 +71,35 @@ def confirm_delete_dialog():
         key="delete_pwd_input_dialog",
         help="Enter the admin password to proceed.",
     )
-    if st.button("Confirm", key="confirm_delete_dialog"):
-        if pwd != ADMIN_PW:
-            st.error("Incorrect administrator password.")
-        else:
-            deleted_any = False
-            errors = []
-            for uuid in selected:
-                try:
-                    delete_image(event_code=ss.event_code, image_uuid=uuid)
-                    deleted_any = True
-                    ss.gallery_selected_images.pop(uuid, None)
-                except Exception as e:
-                    errors.append(f"- {uuid}: {e}")
-            if deleted_any:
-                st.toast(f"Deleted {count} image(s).", icon="✅")
-            if errors:
-                st.error("Some errors occurred:\n" + "\n".join(errors))
+    cols = st.columns([1, 1], gap="small")
+    with cols[0]:
+        if st.button(
+            "Confirm",
+            key="confirm_delete_dialog",
+            type="primary",
+        ):
+            if pwd != ADMIN_PW:
+                st.error("Incorrect administrator password.")
+            else:
+                deleted_any = False
+                errors = []
+                for uuid in selected:
+                    try:
+                        delete_image(event_code=ss.event_code, image_uuid=uuid)
+                        deleted_any = True
+                        ss.gallery_selected_images.pop(uuid, None)
+                    except Exception as e:
+                        errors.append(f"- {uuid}: {e}")
+                if deleted_any:
+                    st.toast(f"Deleted {count} image(s).", icon="✅")
+                if errors:
+                    st.error("Some errors occurred:\n" + "\n".join(errors))
+                ss.gallery_show_delete_dialog = False
+                st.rerun()
+    with cols[1]:
+        if st.button("Cancel", key="cancel_delete_dialog"):
             ss.gallery_show_delete_dialog = False
             st.rerun()
-    if st.button("Cancel", key="cancel_delete_dialog"):
-        ss.gallery_show_delete_dialog = False
-        st.rerun()
 
 
 # Page Title

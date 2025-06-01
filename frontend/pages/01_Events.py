@@ -40,7 +40,7 @@ def main() -> None:
     st.markdown("Manage your events and maintain a collaborative photo album.")
 
     tab_current, tab_create, tab_delete = st.tabs(
-        ["Current Event", "Create New Event", "Delete Event"]
+        ["Current Event", "Create Event", "Delete Event"]
     )
 
     # --------------------------------------------------------------------
@@ -314,8 +314,8 @@ def main() -> None:
             # Display newly created event QR code if available
             qr_url = new_event.get("qr_code_image_url")
             if qr_url:
-                st.subheader("Event QR Code")
-                st.divider(divider="rainbow")
+                st.subheader("Event QR Code", divider="rainbow")
+                st.divider()
 
                 qr_data = None
                 try:
@@ -376,69 +376,98 @@ def main() -> None:
             )
             selected_code = event_options[selected_label]
 
-            ss.setdefault("show_delete_confirmation", False)
+            ss.setdefault("show_delete_event_dialog", False)
+            ss.setdefault("prev_selected_event", "")
+
+            # If user changes the selected event, reset the dialog flag
+            if selected_code != ss.prev_selected_event:
+                ss.show_delete_event_dialog = False
+                ss.prev_selected_event = selected_code
 
             # Stage 1: Show “Delete Event” button
-            if not ss.show_delete_confirmation:
-                if st.button("Delete Event", use_container_width=True):
-                    ss.show_delete_confirmation = True
+            if st.button(
+                "Delete Event",
+                use_container_width=True,
+                type="primary",
+            ):
+                ss.show_delete_event_dialog = True
+                st.rerun()
 
-            # Stage 2: Show confirmation inputs once “Delete Event” is clicked
-            if ss.show_delete_confirmation:
-                st.divider()
-                st.warning(
-                    "You’re about to permanently delete "
-                    f"the event **{selected_label}**. "
-                    "This cannot be undone."
-                )
+            st.markdown("---")
 
-                with st.form("confirm_delete_form"):
+            # If dialog flag is set, open the modal dialog
+            if ss.show_delete_event_dialog:
+
+                @st.dialog("Confirm Delete Event", width="small")
+                def confirm_delete_event(label: str, code: str):
+                    """
+                    Modal dialog to confirm deletion of the selected event.
+                    """
+                    st.warning(
+                        f"You’re about to permanently delete the event **{label}**. This cannot be undone."
+                    )
                     pwd = st.text_input(
                         "Administrator Password",
                         type="password",
-                        help="Administrator password is required to delete an event.",
+                        key="delete_event_pwd_dialog",
+                        help="Administrator password is required to delete the event.",
                     )
-                    confirm_code = st.text_input(
+                    confirm_text = st.text_input(
                         "Type Event Code to Confirm",
-                        placeholder=selected_code,
+                        placeholder=code,
+                        key="confirm_event_code_dialog",
                         help="Re-enter the event code exactly to confirm deletion.",
                     )
-                    confirm_button = st.form_submit_button("Confirm Deletion")
 
-                    if confirm_button:
-                        ADMIN_PW = os.getenv(
-                            "admin_password", "Reallysecurepassword123"
-                        )
+                    cols = st.columns([1, 1], gap="small")
+                    with cols[0]:
+                        if st.button(
+                            "Confirm",
+                            key="confirm_delete_event_button",
+                            type="primary",
+                        ):
+                            ADMIN_PW = os.getenv(
+                                "admin_password", "Reallysecurepassword123"
+                            )
 
-                        if pwd != ADMIN_PW:
-                            st.error("Incorrect administrator password.")
-                        elif confirm_code.strip() != selected_code:
-                            st.error("Event code does not match. Deletion cancelled.")
-                        else:
-                            # Proceed with deletion
-                            try:
-                                delete_event(event_code=selected_code)
-                            except requests.HTTPError as err:
-                                detail = err.response.text or str(err)
+                            if pwd != ADMIN_PW:
+                                st.error("Incorrect administrator password.")
+                            elif confirm_text.strip() != code:
                                 st.error(
-                                    f"Deletion failed ({err.response.status_code}): {detail}"
+                                    "Event code does not match. Deletion cancelled."
                                 )
-                            except Exception as e:
-                                st.error(f"Unexpected error: {e}")
-                                st.stop()
+                            else:
+                                # Proceed with deletion
+                                try:
+                                    delete_event(event_code=code)
+                                except requests.HTTPError as err:
+                                    detail = err.response.text or str(err)
+                                    st.error(
+                                        f"Deletion failed ({err.response.status_code}): {detail}"
+                                    )
+                                    return
+                                except Exception as e:
+                                    st.error(f"Unexpected error: {e}")
+                                    return
 
-                            # On success:
-                            st.toast(f"Event **{selected_label}** deleted.", icon="✅")
+                                # On success:
+                                st.toast(f"Event **{label}** deleted.", icon="✅")
 
-                            # Clear current selection if it matches the deleted event
-                            if ss.get("event_code") == selected_code:
-                                ss.event_code = None
+                                # Clear current selection if it matches the deleted event
+                                if ss.get("event_code") == code:
+                                    ss.event_code = None
 
-                            # Reset confirmation flag so the form hides again
-                            ss.show_delete_confirmation = False
+                                # Reset dialog flag so it hides again
+                                ss.show_delete_event_dialog = False
+                                st.rerun()
 
-                            # Optionally, refetch events so the selectbox updates next time
-                            # (Streamlit reruns on any interaction; no explicit rerun needed)
+                    with cols[1]:
+                        if st.button("Cancel", key="cancel_delete_event_button"):
+                            ss.show_delete_event_dialog = False
+                            st.rerun()
+
+                # Call the dialog, passing in label and code
+                confirm_delete_event(selected_label, selected_code)
 
 
 if __name__ == "__main__":
