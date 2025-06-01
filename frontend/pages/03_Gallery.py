@@ -27,7 +27,7 @@ CLUSTER_ID_UNASSIGNED: int = -1
 CLUSTER_ID_PROCESSING: int = -2
 
 # Admin password for deleting images
-ADMIN_PW = os.getenv("admin_password", "password123")
+ADMIN_PW = os.getenv("ADMIN_PASSWORD", "password123")
 
 # Session State Initialization
 init_session_state()
@@ -69,7 +69,7 @@ def confirm_delete_dialog():
         "Administrator Password",
         type="password",
         key="delete_pwd_input_dialog",
-        help="Enter the admin password to proceed.",
+        help="You must be an administrator to delete images.",
     )
     cols = st.columns([1, 1], gap="small")
     with cols[0]:

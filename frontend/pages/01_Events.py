@@ -22,7 +22,7 @@ st.set_page_config(page_title="Events Manager", page_icon="🎭", layout="center
 AZURE_CONTAINER_NAME_REGEX = re.compile(r"^[a-z0-9](?:[a-z0-9\-]{1,61}[a-z0-9])?$")
 MIN_LEN = 3
 MAX_LEN = 63
-ADMIN_PW = os.getenv("admin_password", "password123")
+ADMIN_PW = os.getenv("ADMIN_PASSWORD", "password123")
 
 
 def main() -> None:
@@ -412,7 +412,7 @@ def main() -> None:
                         "Administrator Password",
                         type="password",
                         key="delete_event_pwd_dialog",
-                        help="Administrator password is required to delete the event.",
+                        help="You must be an administrator to delete events.",
                     )
                     confirm_text = st.text_input(
                         "Type Event Code to Confirm",
