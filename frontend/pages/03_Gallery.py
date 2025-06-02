@@ -109,7 +109,7 @@ st.markdown("View, filter, and download images from your event.")
 active_clusters = ss.gallery_filter_clusters
 if active_clusters:
     ids = ", ".join(map(str, sorted(set(active_clusters))))
-    st.info(f"ℹ Showing images for persons: {ids}.")
+    st.info(f"Showing images for persons: {ids}.")
 
 # Ensure an event is selected
 if not ss.get("event_code"):
@@ -316,8 +316,6 @@ if ss.gallery_download_data:
 # If deletion dialog is flagged, show it
 if ss.gallery_show_delete_dialog:
     confirm_delete_dialog()
-
-st.markdown("---")
 
 
 # --------------------------------------------------------------------
