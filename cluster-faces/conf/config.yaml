@@ -1,7 +1,7 @@
 # conf/config.yaml
 # Configuration for clustering face embeddings using Hydra.
 
-algo: affinity_propagation #[hdbscan, dbscan, optics, affinity_propagation, chinese_whispers, agglomerative, birch]
+algo: hdbscan #[hdbscan, dbscan, optics, affinity_propagation, chinese_whispers, agglomerative, birch]
 processing_method: normalize # [none, normalize, pca, umap]
 
 # --------------------------------------------------------------------
