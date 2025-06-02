@@ -50,6 +50,7 @@ ss.setdefault("gallery_filter_clusters", None)  # list[int] or None
 ss.setdefault("gallery_face_selections", {})  # for popover face checkboxes
 ss.setdefault("gallery_show_delete_dialog", False)  # dialog flag
 ss.setdefault("gallery_prev_count", 0)  # track previous selection count
+ss.setdefault("gallery_reset_filters", False)  # flag to reset filters
 
 
 # --------------------------------------------------------------------
@@ -114,6 +115,14 @@ if active_clusters:
 if not ss.get("event_code"):
     st.warning("Please select an event first to view its image gallery.")
     st.stop()
+
+# Handle filter reset flag
+if ss.gallery_reset_filters:
+    ss.gallery_date_from = None
+    ss.gallery_date_to = None
+    ss.gallery_min_faces = 0
+    ss.gallery_max_faces = 0
+    ss.gallery_reset_filters = False
 
 # --------------------------------------------------------------------
 # Filter Bar: Date, Face Count, Pagination, and Actions
@@ -420,10 +429,7 @@ def image_detail_popover(image_uuid: str) -> None:
     ):
         ss.gallery_filter_clusters = unique_clusters
         ss.gallery_page = 1
-        ss.gallery_date_from = None
-        ss.gallery_date_to = None
-        ss.gallery_min_faces = 0
-        ss.gallery_max_faces = 0
+        ss.gallery_reset_filters = True
         popover_content_requested_key = (
             f"gallery_popover_content_requested_{image_uuid}"
         )
