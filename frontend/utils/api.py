@@ -1,11 +1,11 @@
 import os
-from datetime import datetime
 import time
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
-from requests import HTTPError
 import streamlit as st
+from requests import HTTPError
 
 API_BASE_URL: str = os.getenv("BACKEND_SERVER_URL", "http://backend:8000/api/v1")
 SYSTEM_HEALTH_URL = f"{API_BASE_URL}/system/health"
