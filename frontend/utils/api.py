@@ -18,6 +18,7 @@ FACE_SIMILARITY_URL = f"{API_BASE_URL}/find-similar"
 def wait_for_backend(timeout=30, interval=2):
     """
     Wait for the backend service to be ready.
+
     Args:
         url: The URL to check for readiness.
         timeout: Maximum time to wait in seconds.
