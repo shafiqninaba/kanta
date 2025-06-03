@@ -27,7 +27,7 @@ def wait_for_backend(timeout=30, interval=2):
         True if the backend is ready, otherwise raises an error.
     """
     start = time.time()
-    with st.spinner("Connecting to backend..."):
+    with st.spinner("Connecting to backend...this could take a few seconds."):
         while time.time() - start < timeout:
             try:
                 r = requests.get(SYSTEM_HEALTH_URL, timeout=5)
