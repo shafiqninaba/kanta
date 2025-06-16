@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { getImages, getImageDetail, deleteImage, Image, ImagesParams, ImageDetail } from '../../lib/api';
+import { getImages, getImageDetail, deleteImage, Image, ImagesParams, ImageDetail } from '../api/api';
 import { useEvents } from '../../components/EventContext';
 
 // Modal component

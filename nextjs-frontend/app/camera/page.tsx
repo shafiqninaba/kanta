@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { uploadImage } from '../../lib/api';
+import { uploadImage } from '../api/api';
 import { useEvents } from '../../components/EventContext';
 
 const MAX_DISPOSABLE_SHOTS = 20;

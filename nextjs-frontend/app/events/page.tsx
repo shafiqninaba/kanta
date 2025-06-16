@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { createEvent, updateEvent, deleteEvent, uploadEventImage, Event } from '../../lib/api';
+import { createEvent, updateEvent, deleteEvent, uploadEventImage, Event } from '../api/api';
 import { useEvents } from '../../components/EventContext';
 
 // Modal component
