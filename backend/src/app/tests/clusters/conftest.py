@@ -3,6 +3,7 @@ Pytest configuration for clusters tests.
 
 This file contains common fixtures and configuration for testing the clusters module.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 

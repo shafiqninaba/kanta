@@ -2,8 +2,8 @@
 from functools import lru_cache
 from typing import List, Optional, Union
 
-from pydantic_settings import BaseSettings
 from pydantic import field_validator
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
         )
 
     # Validators to ensure correct types for environment variables
-    @field_validator('POSTGRES_PORT', mode='before')
+    @field_validator("POSTGRES_PORT", mode="before")
     @classmethod
     def parse_postgres_port(cls, v):
         """Convert POSTGRES_PORT to int if it's a string."""
@@ -50,6 +50,7 @@ class Settings(BaseSettings):
                 return int(v)
             except ValueError:
                 raise ValueError("POSTGRES_PORT must be an integer.")
+
 
 @lru_cache()
 def get_settings() -> Settings:

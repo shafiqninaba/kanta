@@ -1,6 +1,7 @@
 """
 Unit tests for the clusters utils module.
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clusters.utils import recluster_event_faces
+
 
 @pytest.fixture
 def mock_db():
@@ -52,7 +54,9 @@ class TestReclusterEventFaces:
     """Tests for the recluster_event_faces function."""
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_success(self, mock_db, mock_event, sample_face_data):
+    async def test_recluster_event_faces_success(
+        self, mock_db, mock_event, sample_face_data
+    ):
         """Test successful reclustering of event faces."""
         # Setup mocks
         mock_result = MagicMock()
@@ -63,9 +67,9 @@ class TestReclusterEventFaces:
         # Assuming faces 1,2 cluster together (label 0), faces 3,4 together (label 1), face 5 is noise (label -1)
         mock_labels = np.array([0, 0, 1, 1, -1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event) as mock_get_event, \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch(
+            "app.clusters.utils.get_event", return_value=mock_event
+        ) as mock_get_event, patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -78,17 +82,23 @@ class TestReclusterEventFaces:
             # Assert
             mock_get_event.assert_called_once_with(mock_db, "test-event")
             mock_db.execute.assert_called()  # Called for select query and updates
-            
+
             # Check DBSCAN was configured correctly
-            mock_dbscan_class.assert_called_once_with(eps=0.4, min_samples=2, metric="cosine")
+            mock_dbscan_class.assert_called_once_with(
+                eps=0.4, min_samples=2, metric="cosine"
+            )
             mock_dbscan_instance.fit.assert_called_once()
-            
+
             # Check that face updates were called
-            assert mock_db.execute.call_count >= len(sample_face_data)  # Select + updates
+            assert mock_db.execute.call_count >= len(
+                sample_face_data
+            )  # Select + updates
             mock_db.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_json_embeddings(self, mock_db, mock_event, sample_face_data_json):
+    async def test_recluster_event_faces_json_embeddings(
+        self, mock_db, mock_event, sample_face_data_json
+    ):
         """Test reclustering with JSON string embeddings."""
         # Setup mocks
         mock_result = MagicMock()
@@ -97,9 +107,9 @@ class TestReclusterEventFaces:
 
         mock_labels = np.array([0, 0, 1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -119,8 +129,10 @@ class TestReclusterEventFaces:
     @pytest.mark.asyncio
     async def test_recluster_event_faces_event_not_found(self, mock_db):
         """Test reclustering when event doesn't exist."""
-        with patch("app.clusters.utils.DBSCAN", MagicMock()), \
-             patch("app.clusters.utils.get_event", side_effect=HTTPException(404, "Event not found")):
+        with patch("app.clusters.utils.DBSCAN", MagicMock()), patch(
+            "app.clusters.utils.get_event",
+            side_effect=HTTPException(404, "Event not found"),
+        ):
             with pytest.raises(HTTPException) as excinfo:
                 await recluster_event_faces(mock_db, "nonexistent-event")
 
@@ -144,8 +156,9 @@ class TestReclusterEventFaces:
         mock_result.all.return_value = []
         mock_db.execute.return_value = mock_result
 
-        with patch("app.clusters.utils.DBSCAN", MagicMock()), \
-             patch("app.clusters.utils.get_event", return_value=mock_event):
+        with patch("app.clusters.utils.DBSCAN", MagicMock()), patch(
+            "app.clusters.utils.get_event", return_value=mock_event
+        ):
             # Execute
             await recluster_event_faces(mock_db, "test-event")
 
@@ -153,7 +166,9 @@ class TestReclusterEventFaces:
             mock_db.commit.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_default_parameters(self, mock_db, mock_event, sample_face_data):
+    async def test_recluster_event_faces_default_parameters(
+        self, mock_db, mock_event, sample_face_data
+    ):
         """Test reclustering with default DBSCAN parameters."""
         # Setup mocks
         mock_result = MagicMock()
@@ -162,9 +177,9 @@ class TestReclusterEventFaces:
 
         mock_labels = np.array([0, 0, 1, 1, -1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -175,10 +190,14 @@ class TestReclusterEventFaces:
             await recluster_event_faces(mock_db, "test-event")
 
             # Assert default parameters
-            mock_dbscan_class.assert_called_once_with(eps=0.5, min_samples=5, metric="cosine")
+            mock_dbscan_class.assert_called_once_with(
+                eps=0.5, min_samples=5, metric="cosine"
+            )
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_sql_queries(self, mock_db, mock_event, sample_face_data):
+    async def test_recluster_event_faces_sql_queries(
+        self, mock_db, mock_event, sample_face_data
+    ):
         """Test that correct SQL queries are executed."""
         # Setup mocks
         mock_result = MagicMock()
@@ -187,9 +206,9 @@ class TestReclusterEventFaces:
 
         mock_labels = np.array([0, 0, 1, 1, -1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -205,7 +224,9 @@ class TestReclusterEventFaces:
             assert mock_db.execute.call_count == expected_call_count
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_embedding_matrix_construction(self, mock_db, mock_event):
+    async def test_recluster_event_faces_embedding_matrix_construction(
+        self, mock_db, mock_event
+    ):
         """Test proper construction of embedding matrix from mixed data types."""
         # Mix of list and JSON string embeddings
         mixed_face_data = [
@@ -220,9 +241,9 @@ class TestReclusterEventFaces:
 
         mock_labels = np.array([0, 0, 1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -240,11 +261,15 @@ class TestReclusterEventFaces:
 
             # Check specific values were correctly processed
             np.testing.assert_array_almost_equal(fit_call_args[0][:3], [0.1, 0.2, 0.3])
-            np.testing.assert_array_almost_equal(fit_call_args[1][:3], [0.15, 0.25, 0.35])
+            np.testing.assert_array_almost_equal(
+                fit_call_args[1][:3], [0.15, 0.25, 0.35]
+            )
             np.testing.assert_array_almost_equal(fit_call_args[2][:3], [0.8, 0.9, 0.7])
 
     @pytest.mark.asyncio
-    async def test_recluster_event_faces_cluster_label_assignment(self, mock_db, mock_event, sample_face_data):
+    async def test_recluster_event_faces_cluster_label_assignment(
+        self, mock_db, mock_event, sample_face_data
+    ):
         """Test that cluster labels are correctly assigned to faces."""
         # Setup mocks
         mock_result = MagicMock()
@@ -257,16 +282,16 @@ class TestReclusterEventFaces:
         captured_updates = []
 
         def capture_execute(query, *args, **kwargs):
-            if hasattr(query, 'compile'):
+            if hasattr(query, "compile"):
                 # This is an update query
                 captured_updates.append((query, args, kwargs))
             return mock_result
 
         mock_db.execute.side_effect = capture_execute
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance
@@ -293,9 +318,9 @@ class TestReclusterEventFaces:
         # Single face will likely be labeled as noise (-1) with min_samples > 1
         mock_labels = np.array([-1])
 
-        with patch("app.clusters.utils.get_event", return_value=mock_event), \
-             patch("app.clusters.utils.DBSCAN") as mock_dbscan_class:
-
+        with patch("app.clusters.utils.get_event", return_value=mock_event), patch(
+            "app.clusters.utils.DBSCAN"
+        ) as mock_dbscan_class:
             # Setup DBSCAN mock
             mock_dbscan_instance = MagicMock()
             mock_dbscan_instance.fit.return_value = mock_dbscan_instance

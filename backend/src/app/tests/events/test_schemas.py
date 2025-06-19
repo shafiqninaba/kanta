@@ -1,17 +1,19 @@
 """
 Unit tests for the events schemas.
 """
+
 from datetime import datetime, timedelta, timezone
+
 import pytest
 from pydantic import ValidationError
 
 from app.events.schemas import (
+    AZURE_CONTAINER_NAME_REGEX,
     CreateEventInput,
-    UpdateEventInput,
     DeleteEventInput,
     EventInfo,
     EventListResponse,
-    AZURE_CONTAINER_NAME_REGEX
+    UpdateEventInput,
 )
 
 
@@ -28,9 +30,9 @@ class TestCreateEventInput:
             "start_date_time": now,
             "end_date_time": now + timedelta(days=1),
         }
-        
+
         event_input = CreateEventInput(**data)
-        
+
         assert event_input.event_code == data["event_code"]
         assert event_input.name == data["name"]
         assert event_input.description == data["description"]
@@ -39,27 +41,21 @@ class TestCreateEventInput:
 
     def test_invalid_event_code_too_short(self):
         """Test event_code validation - too short."""
-        data = {
-            "event_code": "ab",
-            "name": "Test Event"
-        }
-        
+        data = {"event_code": "ab", "name": "Test Event"}
+
         with pytest.raises(ValidationError) as excinfo:
             CreateEventInput(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "string_too_short"
 
     def test_invalid_event_code_too_long(self):
         """Test event_code validation - too long."""
-        data = {
-            "event_code": "a" * 64,
-            "name": "Test Event"
-        }
-        
+        data = {"event_code": "a" * 64, "name": "Test Event"}
+
         with pytest.raises(ValidationError) as excinfo:
             CreateEventInput(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "string_too_long"
 
@@ -72,10 +68,10 @@ class TestCreateEventInput:
             "start_date_time": now + timedelta(days=2),
             "end_date_time": now + timedelta(days=1),
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             CreateEventInput(**data)
-        
+
         assert "start_date_time must be before end_date_time" in str(excinfo.value)
 
     def test_azure_container_regex(self):
@@ -84,26 +80,26 @@ class TestCreateEventInput:
             "myevent123",
             "my-event",
             "a-b-c",
-            "a"  # Technically valid but would fail min_length in schema
+            "a",  # Technically valid but would fail min_length in schema
         ]
 
         invalid_names = [
-            "-myevent",    # Can't start with hyphen
-            "myevent-",    # Can't end with hyphen
-            "MY_EVENT",    # No uppercase or underscore
-            "my event",    # No spaces
-            "my.event",    # No dots
-            "my@event"     # No special chars
+            "-myevent",  # Can't start with hyphen
+            "myevent-",  # Can't end with hyphen
+            "MY_EVENT",  # No uppercase or underscore
+            "my event",  # No spaces
+            "my.event",  # No dots
+            "my@event",  # No special chars
         ]
-        
+
         # Test that the current regex allows consecutive hyphens (which is the actual Azure behavior)
         # According to Azure documentation, consecutive hyphens are actually allowed
         consecutive_hyphen_name = "my--event"
         assert AZURE_CONTAINER_NAME_REGEX.match(consecutive_hyphen_name) is not None
-        
+
         for name in valid_names:
             assert AZURE_CONTAINER_NAME_REGEX.match(name) is not None
-        
+
         for name in invalid_names:
             assert AZURE_CONTAINER_NAME_REGEX.match(name) is None
 
@@ -121,9 +117,9 @@ class TestUpdateEventInput:
             "start_date_time": now,
             "end_date_time": now + timedelta(days=1),
         }
-        
+
         event_input = UpdateEventInput(**data)
-        
+
         assert event_input.event_code == data["event_code"]
         assert event_input.name == data["name"]
         assert event_input.description == data["description"]
@@ -136,9 +132,9 @@ class TestUpdateEventInput:
             "event_code": "old-event",
             "new_event_code": "new-event",
         }
-        
+
         event_input = UpdateEventInput(**data)
-        
+
         assert event_input.event_code == data["event_code"]
         assert event_input.new_event_code == data["new_event_code"]
 
@@ -148,9 +144,9 @@ class TestUpdateEventInput:
             "event_code": "test-event",
             "name": "Updated Name",
         }
-        
+
         event_input = UpdateEventInput(**data)
-        
+
         assert event_input.event_code == data["event_code"]
         assert event_input.name == data["name"]
         assert event_input.description is None
@@ -165,10 +161,10 @@ class TestUpdateEventInput:
             "start_date_time": now + timedelta(days=2),
             "end_date_time": now + timedelta(days=1),
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             UpdateEventInput(**data)
-        
+
         assert "start_date_time must be before end_date_time" in str(excinfo.value)
 
 
@@ -180,18 +176,18 @@ class TestDeleteEventInput:
         data = {
             "event_code": "test-event",
         }
-        
+
         event_input = DeleteEventInput(**data)
-        
+
         assert event_input.event_code == data["event_code"]
 
     def test_missing_event_code(self):
         """Test missing event_code field."""
         data = {}
-        
+
         with pytest.raises(ValidationError) as excinfo:
             DeleteEventInput(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("event_code",)
@@ -214,9 +210,9 @@ class TestEventInfo:
             "event_image_url": "https://storage.test/images/event.jpg",
             "qr_code_image_url": "https://storage.test/images/qr.png",
         }
-        
+
         event_info = EventInfo(**data)
-        
+
         assert event_info.code == data["code"]
         assert event_info.name == data["name"]
         assert event_info.description == data["description"]

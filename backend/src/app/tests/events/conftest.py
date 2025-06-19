@@ -3,6 +3,7 @@ Pytest configuration for event tests.
 
 This file contains common fixtures and configuration for testing the events module.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 

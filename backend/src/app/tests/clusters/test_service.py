@@ -1,6 +1,7 @@
 """
 Unit tests for the clusters service module.
 """
+
 import json
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,7 +12,7 @@ from fastapi import HTTPException
 from PIL import Image as PILImage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clusters.service import get_cluster_summary, find_similar_faces
+from app.clusters.service import find_similar_faces, get_cluster_summary
 
 
 @pytest.fixture
@@ -96,35 +97,49 @@ class TestGetClusterSummary:
     """Tests for the get_cluster_summary function."""
 
     @pytest.mark.asyncio
-    async def test_get_cluster_summary_success(self, mock_db, mock_event, sample_cluster_data):
+    async def test_get_cluster_summary_success(
+        self, mock_db, mock_event, sample_cluster_data
+    ):
         """Test successful cluster summary retrieval."""
         # Setup mocks
         mock_result = MagicMock()
         mock_result.mappings().all.return_value = sample_cluster_data
         mock_db.execute.return_value = mock_result
 
-        with patch("app.clusters.service.get_event", return_value=mock_event) as mock_get_event:
+        with patch(
+            "app.clusters.service.get_event", return_value=mock_event
+        ) as mock_get_event:
             # Execute
             result = await get_cluster_summary(mock_db, "test-event", 2)
 
             # Assert
             mock_get_event.assert_called_once_with(mock_db, "test-event")
             mock_db.execute.assert_called_once()
-            
+
             assert len(result) == 2  # Two clusters
-            
+
             # Check first cluster
             cluster_0 = next(c for c in result if c.cluster_id == 0)
             assert cluster_0.face_count == 3
             assert len(cluster_0.samples) == 2
             assert cluster_0.samples[0].face_id == 1
             assert cluster_0.samples[1].face_id == 2
-            
+
             # Check bbox parsing (string to dict)
-            assert cluster_0.samples[0].sample_bbox == {"x": 100, "y": 150, "width": 200, "height": 250}
+            assert cluster_0.samples[0].sample_bbox == {
+                "x": 100,
+                "y": 150,
+                "width": 200,
+                "height": 250,
+            }
             # Check bbox already as dict
-            assert cluster_0.samples[1].sample_bbox == {"x": 120, "y": 160, "width": 180, "height": 240}
-            
+            assert cluster_0.samples[1].sample_bbox == {
+                "x": 120,
+                "y": 160,
+                "width": 180,
+                "height": 240,
+            }
+
             # Check second cluster
             cluster_1 = next(c for c in result if c.cluster_id == 1)
             assert cluster_1.face_count == 5
@@ -134,10 +149,13 @@ class TestGetClusterSummary:
     @pytest.mark.asyncio
     async def test_get_cluster_summary_event_not_found(self, mock_db):
         """Test cluster summary when event doesn't exist."""
-        with patch("app.clusters.service.get_event", side_effect=HTTPException(404, "Event not found")):
+        with patch(
+            "app.clusters.service.get_event",
+            side_effect=HTTPException(404, "Event not found"),
+        ):
             with pytest.raises(HTTPException) as excinfo:
                 await get_cluster_summary(mock_db, "nonexistent-event", 2)
-            
+
             assert excinfo.value.status_code == 404
 
     @pytest.mark.asyncio
@@ -156,7 +174,9 @@ class TestGetClusterSummary:
             assert len(result) == 0
 
     @pytest.mark.asyncio
-    async def test_get_cluster_summary_sql_parameters(self, mock_db, mock_event, sample_cluster_data):
+    async def test_get_cluster_summary_sql_parameters(
+        self, mock_db, mock_event, sample_cluster_data
+    ):
         """Test that SQL parameters are correctly passed."""
         # Setup mocks
         mock_result = MagicMock()
@@ -178,7 +198,9 @@ class TestFindSimilarFaces:
     """Tests for the find_similar_faces function."""
 
     @pytest.mark.asyncio
-    async def test_find_similar_faces_success_cosine(self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data):
+    async def test_find_similar_faces_success_cosine(
+        self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data
+    ):
         """Test successful similar faces search with cosine metric."""
         # Setup mocks
         mock_result = MagicMock()
@@ -189,21 +211,26 @@ class TestFindSimilarFaces:
         mock_boxes = [(150, 250, 350, 50)]  # (top, right, bottom, left)
         mock_embedding = np.array([0.1] * 128)
 
-        with patch("app.clusters.service.get_event", return_value=mock_event) as mock_get_event, \
-             patch("face_recognition.face_locations", return_value=mock_boxes) as mock_face_locations, \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]) as mock_face_encodings:
-
+        with patch(
+            "app.clusters.service.get_event", return_value=mock_event
+        ) as mock_get_event, patch(
+            "face_recognition.face_locations", return_value=mock_boxes
+        ) as mock_face_locations, patch(
+            "face_recognition.face_encodings", return_value=[mock_embedding]
+        ) as mock_face_encodings:
             # Execute
-            result = await find_similar_faces(mock_db, "test-event", test_image_bytes, "cosine", 2)
+            result = await find_similar_faces(
+                mock_db, "test-event", test_image_bytes, "cosine", 2
+            )
 
             # Assert
             mock_get_event.assert_called_once_with(mock_db, "test-event")
             mock_face_locations.assert_called_once()
             mock_face_encodings.assert_called_once()
             mock_db.execute.assert_called_once()
-            
+
             assert len(result) == 2
-            
+
             # Check first result
             assert result[0].face_id == 1
             assert result[0].image_uuid == "550e8400-e29b-41d4-a716-446655440000"
@@ -211,13 +238,15 @@ class TestFindSimilarFaces:
             assert result[0].distance == 0.25
             assert result[0].bbox == {"x": 100, "y": 150, "width": 200, "height": 250}
             assert len(result[0].embedding) == 128
-            
+
             # Check second result
             assert result[1].face_id == 2
             assert result[1].distance == 0.45
 
     @pytest.mark.asyncio
-    async def test_find_similar_faces_success_l2(self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data):
+    async def test_find_similar_faces_success_l2(
+        self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data
+    ):
         """Test successful similar faces search with L2 metric."""
         # Setup mocks
         mock_result = MagicMock()
@@ -227,10 +256,9 @@ class TestFindSimilarFaces:
         mock_boxes = [(150, 250, 350, 50)]
         mock_embedding = np.array([0.1] * 128)
 
-        with patch("app.clusters.service.get_event", return_value=mock_event), \
-             patch("face_recognition.face_locations", return_value=mock_boxes), \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]):
-
+        with patch("app.clusters.service.get_event", return_value=mock_event), patch(
+            "face_recognition.face_locations", return_value=mock_boxes
+        ), patch("face_recognition.face_encodings", return_value=[mock_embedding]):
             # Execute
             await find_similar_faces(mock_db, "test-event", test_image_bytes, "l2", 2)
 
@@ -240,7 +268,9 @@ class TestFindSimilarFaces:
             assert "<->" in sql_query  # L2 operator
 
     @pytest.mark.asyncio
-    async def test_find_similar_faces_sql_parameters(self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data):
+    async def test_find_similar_faces_sql_parameters(
+        self, mock_db, mock_event, test_image_bytes, sample_similar_faces_data
+    ):
         """Test that SQL parameters are correctly passed."""
         # Setup mocks
         mock_result = MagicMock()
@@ -250,19 +280,20 @@ class TestFindSimilarFaces:
         mock_boxes = [(150, 250, 350, 50)]
         mock_embedding = np.array([0.1, 0.2, 0.3] + [0.0] * 125)
 
-        with patch("app.clusters.service.get_event", return_value=mock_event), \
-             patch("face_recognition.face_locations", return_value=mock_boxes), \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]):
-
+        with patch("app.clusters.service.get_event", return_value=mock_event), patch(
+            "face_recognition.face_locations", return_value=mock_boxes
+        ), patch("face_recognition.face_encodings", return_value=[mock_embedding]):
             # Execute
-            await find_similar_faces(mock_db, "test-event", test_image_bytes, "cosine", 5)
+            await find_similar_faces(
+                mock_db, "test-event", test_image_bytes, "cosine", 5
+            )
 
             # Assert SQL parameters
             call_args = mock_db.execute.call_args
             sql_params = call_args[0][1]
             assert sql_params["event_id"] == mock_event.id
             assert sql_params["limit"] == 5
-            
+
             # Check vector literal format
             vector_literal = sql_params["vector"]
             assert vector_literal.startswith("[")
@@ -275,7 +306,9 @@ class TestFindSimilarFaces:
         invalid_image_bytes = b"not-an-image"
 
         with pytest.raises(HTTPException) as excinfo:
-            await find_similar_faces(mock_db, "test-event", invalid_image_bytes, "cosine", 2)
+            await find_similar_faces(
+                mock_db, "test-event", invalid_image_bytes, "cosine", 2
+            )
 
         assert excinfo.value.status_code == 400
         assert "Invalid image data" in str(excinfo.value.detail)
@@ -285,13 +318,17 @@ class TestFindSimilarFaces:
         """Test find similar faces when no face is detected."""
         with patch("face_recognition.face_locations", return_value=[]):
             with pytest.raises(HTTPException) as excinfo:
-                await find_similar_faces(mock_db, "test-event", test_image_bytes, "cosine", 2)
+                await find_similar_faces(
+                    mock_db, "test-event", test_image_bytes, "cosine", 2
+                )
 
             assert excinfo.value.status_code == 400
             assert "No face detected" in str(excinfo.value.detail)
 
     @pytest.mark.asyncio
-    async def test_find_similar_faces_multiple_faces_detected(self, mock_db, test_image_bytes):
+    async def test_find_similar_faces_multiple_faces_detected(
+        self, mock_db, test_image_bytes
+    ):
         """Test find similar faces when multiple faces are detected."""
         mock_boxes = [
             (150, 250, 350, 50),
@@ -300,7 +337,9 @@ class TestFindSimilarFaces:
 
         with patch("face_recognition.face_locations", return_value=mock_boxes):
             with pytest.raises(HTTPException) as excinfo:
-                await find_similar_faces(mock_db, "test-event", test_image_bytes, "cosine", 2)
+                await find_similar_faces(
+                    mock_db, "test-event", test_image_bytes, "cosine", 2
+                )
 
             assert excinfo.value.status_code == 400
             assert "Multiple faces detected" in str(excinfo.value.detail)
@@ -311,17 +350,23 @@ class TestFindSimilarFaces:
         mock_boxes = [(150, 250, 350, 50)]
         mock_embedding = np.array([0.1] * 128)
 
-        with patch("app.clusters.service.get_event", side_effect=HTTPException(404, "Event not found")), \
-             patch("face_recognition.face_locations", return_value=mock_boxes), \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]):
-
+        with patch(
+            "app.clusters.service.get_event",
+            side_effect=HTTPException(404, "Event not found"),
+        ), patch("face_recognition.face_locations", return_value=mock_boxes), patch(
+            "face_recognition.face_encodings", return_value=[mock_embedding]
+        ):
             with pytest.raises(HTTPException) as excinfo:
-                await find_similar_faces(mock_db, "nonexistent-event", test_image_bytes, "cosine", 2)
+                await find_similar_faces(
+                    mock_db, "nonexistent-event", test_image_bytes, "cosine", 2
+                )
 
             assert excinfo.value.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_find_similar_faces_empty_result(self, mock_db, mock_event, test_image_bytes):
+    async def test_find_similar_faces_empty_result(
+        self, mock_db, mock_event, test_image_bytes
+    ):
         """Test find similar faces with no matches."""
         # Setup mocks
         mock_result = MagicMock()
@@ -331,12 +376,13 @@ class TestFindSimilarFaces:
         mock_boxes = [(150, 250, 350, 50)]
         mock_embedding = np.array([0.1] * 128)
 
-        with patch("app.clusters.service.get_event", return_value=mock_event), \
-             patch("face_recognition.face_locations", return_value=mock_boxes), \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]):
-
+        with patch("app.clusters.service.get_event", return_value=mock_event), patch(
+            "face_recognition.face_locations", return_value=mock_boxes
+        ), patch("face_recognition.face_encodings", return_value=[mock_embedding]):
             # Execute
-            result = await find_similar_faces(mock_db, "test-event", test_image_bytes, "cosine", 2)
+            result = await find_similar_faces(
+                mock_db, "test-event", test_image_bytes, "cosine", 2
+            )
 
             # Assert
             assert len(result) == 0
@@ -356,10 +402,11 @@ class TestFindSimilarFaces:
         mock_result.mappings().all.return_value = []
         mock_db.execute.return_value = mock_result
 
-        with patch("app.clusters.service.get_event", return_value=mock_event), \
-             patch("face_recognition.face_locations", return_value=mock_boxes) as mock_face_locations, \
-             patch("face_recognition.face_encodings", return_value=[mock_embedding]):
-
+        with patch("app.clusters.service.get_event", return_value=mock_event), patch(
+            "face_recognition.face_locations", return_value=mock_boxes
+        ) as mock_face_locations, patch(
+            "face_recognition.face_encodings", return_value=[mock_embedding]
+        ):
             # Execute
             await find_similar_faces(mock_db, "test-event", test_bytes, "cosine", 1)
 

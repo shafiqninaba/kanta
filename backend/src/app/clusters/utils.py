@@ -3,7 +3,6 @@ from typing import Any, List, Tuple
 
 import numpy as np
 from fastapi import HTTPException
-
 from sklearn.cluster import DBSCAN
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,11 +36,8 @@ async def recluster_event_faces(
     """
     # Check if DBSCAN is available
     if DBSCAN is None:
-        raise HTTPException(
-            status_code=500,
-            detail="DBSCAN clustering not available"
-        )
-    
+        raise HTTPException(status_code=500, detail="DBSCAN clustering not available")
+
     # 1) Resolve event → its numeric ID (or 404)
     event = await get_event(db, event_code)
 

@@ -11,7 +11,7 @@ import hydra
 import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from sklearn.preprocessing import normalize
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -27,7 +27,6 @@ from src.clustering import (
 )
 from src.processing import process_pca, process_umap
 from tqdm.asyncio import tqdm
-from omegaconf import OmegaConf
 
 # Load environment variables
 load_dotenv()
@@ -234,6 +233,7 @@ async def run(cfg: DictConfig) -> None:
 def main(cfg: DictConfig) -> None:
     """Hydra main entry point."""
     asyncio.run(run(cfg))
+
 
 # AWS Lambda handler
 async def handler_async(event, context):

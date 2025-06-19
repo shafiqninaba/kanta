@@ -1,10 +1,12 @@
 """
 Unit tests for the clusters schemas.
 """
+
 import pytest
 from pydantic import ValidationError
 
-from app.clusters.schemas import ClusterSample, ClusterInfo, SimilarFaceOut
+from app.clusters.schemas import ClusterInfo, ClusterSample, SimilarFaceOut
+
 
 class TestClusterSample:
     """Tests for the ClusterSample schema."""
@@ -16,9 +18,9 @@ class TestClusterSample:
             "sample_blob_url": "https://storage.test.com/container/image.jpg",
             "sample_bbox": {"x": 100, "y": 150, "width": 200, "height": 250},
         }
-        
+
         sample = ClusterSample(**data)
-        
+
         assert sample.face_id == data["face_id"]
         assert sample.sample_blob_url == data["sample_blob_url"]
         assert sample.sample_bbox == data["sample_bbox"]
@@ -29,10 +31,10 @@ class TestClusterSample:
             "sample_blob_url": "https://storage.test.com/container/image.jpg",
             "sample_bbox": {"x": 100, "y": 150, "width": 200, "height": 250},
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterSample(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("face_id",)
@@ -43,10 +45,10 @@ class TestClusterSample:
             "face_id": 123,
             "sample_bbox": {"x": 100, "y": 150, "width": 200, "height": 250},
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterSample(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("sample_blob_url",)
@@ -57,10 +59,10 @@ class TestClusterSample:
             "face_id": 123,
             "sample_blob_url": "https://storage.test.com/container/image.jpg",
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterSample(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("sample_bbox",)
@@ -72,10 +74,10 @@ class TestClusterSample:
             "sample_blob_url": "https://storage.test.com/container/image.jpg",
             "sample_bbox": {"x": 100, "y": 150, "width": 200, "height": 250},
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterSample(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "int_parsing"
 
@@ -95,15 +97,15 @@ class TestClusterInfo:
             "sample_blob_url": "https://storage.test.com/container/image2.jpg",
             "sample_bbox": {"x": 50, "y": 75, "width": 180, "height": 220},
         }
-        
+
         data = {
             "cluster_id": 5,
             "face_count": 25,
             "samples": [sample1, sample2],
         }
-        
+
         cluster_info = ClusterInfo(**data)
-        
+
         assert cluster_info.cluster_id == data["cluster_id"]
         assert cluster_info.face_count == data["face_count"]
         assert len(cluster_info.samples) == 2
@@ -117,9 +119,9 @@ class TestClusterInfo:
             "face_count": 0,
             "samples": [],
         }
-        
+
         cluster_info = ClusterInfo(**data)
-        
+
         assert cluster_info.cluster_id == data["cluster_id"]
         assert cluster_info.face_count == data["face_count"]
         assert len(cluster_info.samples) == 0
@@ -130,10 +132,10 @@ class TestClusterInfo:
             "face_count": 25,
             "samples": [],
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterInfo(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("cluster_id",)
@@ -144,10 +146,10 @@ class TestClusterInfo:
             "cluster_id": 5,
             "samples": [],
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterInfo(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("face_count",)
@@ -159,16 +161,16 @@ class TestClusterInfo:
             "sample_blob_url": "https://storage.test.com/container/image.jpg",
             "sample_bbox": {"x": 100, "y": 150, "width": 200, "height": 250},
         }
-        
+
         data = {
             "cluster_id": 5,
             "face_count": 1,
             "samples": [invalid_sample],
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             ClusterInfo(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "int_parsing"
         assert error["loc"] == ("samples", 0, "face_id")
@@ -189,9 +191,9 @@ class TestSimilarFaceOut:
             "embedding": embedding,
             "distance": 0.85,
         }
-        
+
         similar_face = SimilarFaceOut(**data)
-        
+
         assert similar_face.face_id == data["face_id"]
         assert similar_face.image_uuid == data["image_uuid"]
         assert similar_face.azure_blob_url == data["azure_blob_url"]
@@ -211,10 +213,10 @@ class TestSimilarFaceOut:
             "embedding": embedding,
             "distance": 0.85,
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             SimilarFaceOut(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("face_id",)
@@ -230,10 +232,10 @@ class TestSimilarFaceOut:
             "embedding": embedding,
             "distance": 0.85,
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             SimilarFaceOut(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "missing"
         assert error["loc"] == ("image_uuid",)
@@ -249,10 +251,10 @@ class TestSimilarFaceOut:
             "embedding": "not-a-list",
             "distance": 0.85,
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             SimilarFaceOut(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "list_type"
         assert error["loc"] == ("embedding",)
@@ -269,10 +271,10 @@ class TestSimilarFaceOut:
             "embedding": embedding,
             "distance": "not-a-float",
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             SimilarFaceOut(**data)
-        
+
         error = excinfo.value.errors()[0]
         assert error["type"] == "float_parsing"
         assert error["loc"] == ("distance",)
@@ -289,7 +291,7 @@ class TestSimilarFaceOut:
             "embedding": short_embedding,
             "distance": 0.85,
         }
-        
+
         # Should still be valid since we don't enforce length constraint
         similar_face = SimilarFaceOut(**data)
         assert len(similar_face.embedding) == 64
@@ -306,6 +308,6 @@ class TestSimilarFaceOut:
             "embedding": embedding,
             "distance": 0.85,
         }
-        
+
         similar_face = SimilarFaceOut(**data)
         assert similar_face.cluster_id == -1

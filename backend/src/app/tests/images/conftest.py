@@ -3,14 +3,15 @@ Pytest configuration for image tests.
 
 This file contains common fixtures and configuration for testing the images module.
 """
+
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 from azure.storage.blob import ContainerClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.images.models import Image, Face
+from app.images.models import Face, Image
 
 
 @pytest.fixture
@@ -84,8 +85,10 @@ def sample_upload_file():
 @pytest.fixture
 def mock_face_recognition():
     """Mock face_recognition module functions."""
-    with patch('app.images.service.face_recognition') as mock_fr:
-        mock_fr.face_locations.return_value = [(10, 90, 110, 10)]  # (top, right, bottom, left)
+    with patch("app.images.service.face_recognition") as mock_fr:
+        mock_fr.face_locations.return_value = [
+            (10, 90, 110, 10)
+        ]  # (top, right, bottom, left)
         mock_fr.face_encodings.return_value = [[0.1] * 128]
         yield mock_fr
 
@@ -93,7 +96,7 @@ def mock_face_recognition():
 @pytest.fixture
 def mock_pil_image():
     """Mock PIL Image operations."""
-    with patch('app.images.service.PILImage') as mock_pil:
+    with patch("app.images.service.PILImage") as mock_pil:
         mock_img = MagicMock()
         mock_pil.open.return_value.convert.return_value = mock_img
         yield mock_pil

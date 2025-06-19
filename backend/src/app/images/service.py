@@ -7,6 +7,7 @@ from typing import List, Optional
 import face_recognition
 import numpy as np
 from azure.storage.blob import ContainerClient
+from fastapi import HTTPException
 from loguru import logger
 from PIL import Image as PILImage
 from sqlalchemy import select
@@ -20,8 +21,6 @@ from .schemas import (
     ImageDetailResponse,
     ImageListItem,
 )
-
-from fastapi import HTTPException
 
 # Create a global ProcessPoolExecutor, perhaps with 4 worker processes
 _process_pool = ProcessPoolExecutor(max_workers=4)

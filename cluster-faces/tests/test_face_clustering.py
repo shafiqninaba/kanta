@@ -1,19 +1,19 @@
+from collections import Counter
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
-from collections import Counter
-
-from src.processing import process_pca, process_umap
 from src.clustering import (
-    dbscan_cluster,
-    hdbscan_cluster,
+    affinity_propagation_cluster,
+    agglomerative_cluster,
     birch_cluster,
     chinese_whispers_cluster,
-    agglomerative_cluster,
+    dbscan_cluster,
+    hdbscan_cluster,
     optics_cluster,
-    affinity_propagation_cluster,
 )
+from src.processing import process_pca, process_umap
 
 
 @pytest.fixture

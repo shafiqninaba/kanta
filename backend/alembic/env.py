@@ -3,6 +3,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 from src.app.db.base import Base
+
 # from src.app.events.models import Event
 # from src.app.images.models import Face, Image
 # from myapp import mymodel

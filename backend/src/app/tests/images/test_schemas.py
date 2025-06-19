@@ -1,14 +1,15 @@
 """
 Unit tests for the images schemas.
 """
+
 import pytest
 from pydantic import ValidationError
 
 from app.images.schemas import (
-    UploadImageResponse,
-    ImageListItem,
     FaceSummary,
     ImageDetailResponse,
+    ImageListItem,
+    UploadImageResponse,
 )
 
 
@@ -24,9 +25,9 @@ class TestUploadImageResponse:
             "boxes": [[10, 90, 110, 10], [20, 80, 120, 20]],
             "embeddings": [[0.1] * 128, [0.2] * 128],
         }
-        
+
         response = UploadImageResponse(**data)
-        
+
         assert response.uuid == data["uuid"]
         assert response.blob_url == data["blob_url"]
         assert response.faces == data["faces"]
@@ -42,9 +43,9 @@ class TestUploadImageResponse:
             "boxes": [],
             "embeddings": [],
         }
-        
+
         response = UploadImageResponse(**data)
-        
+
         assert response.faces == 0
         assert response.boxes == []
         assert response.embeddings == []
@@ -53,7 +54,7 @@ class TestUploadImageResponse:
         """Test UploadImageResponse with multiple faces."""
         boxes = [[10, 90, 110, 10], [150, 240, 250, 150], [300, 400, 450, 320]]
         embeddings = [[0.1] * 128, [0.2] * 128, [0.3] * 128]
-        
+
         data = {
             "uuid": "multi-faces-uuid",
             "blob_url": "https://storage.test/images/multi-faces.jpg",
@@ -61,9 +62,9 @@ class TestUploadImageResponse:
             "boxes": boxes,
             "embeddings": embeddings,
         }
-        
+
         response = UploadImageResponse(**data)
-        
+
         assert response.faces == 3
         assert len(response.boxes) == 3
         assert len(response.embeddings) == 3
@@ -77,12 +78,14 @@ class TestUploadImageResponse:
             "blob_url": "https://storage.test/test.jpg",
             # Missing faces, boxes, embeddings
         }
-        
+
         with pytest.raises(ValidationError) as excinfo:
             UploadImageResponse(**incomplete_data)
-        
+
         errors = excinfo.value.errors()
-        missing_fields = [error["loc"][0] for error in errors if error["type"] == "missing"]
+        missing_fields = [
+            error["loc"][0] for error in errors if error["type"] == "missing"
+        ]
         assert "faces" in missing_fields
         assert "boxes" in missing_fields
         assert "embeddings" in missing_fields
@@ -101,9 +104,9 @@ class TestImageListItem:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         item = ImageListItem(**data)
-        
+
         assert item.uuid == data["uuid"]
         assert item.azure_blob_url == data["azure_blob_url"]
         assert item.file_extension == data["file_extension"]
@@ -114,7 +117,7 @@ class TestImageListItem:
     def test_image_list_item_different_extensions(self, utc_now):
         """Test ImageListItem with different file extensions."""
         extensions = ["jpg", "jpeg", "png", "gif", "bmp", "tiff"]
-        
+
         for ext in extensions:
             data = {
                 "uuid": f"test-{ext}",
@@ -124,7 +127,7 @@ class TestImageListItem:
                 "created_at": utc_now,
                 "last_modified": utc_now,
             }
-            
+
             item = ImageListItem(**data)
             assert item.file_extension == ext
 
@@ -138,7 +141,7 @@ class TestImageListItem:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         item = ImageListItem(**data)
         assert item.faces == 0
 
@@ -152,13 +155,13 @@ class TestImageListItem:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         item = ImageListItem(**data)
         assert item.faces == 50
 
     def test_image_list_item_from_orm_config(self):
         """Test that ImageListItem has from_attributes=True config."""
-        assert ImageListItem.model_config.get('from_attributes', False)
+        assert ImageListItem.model_config.get("from_attributes", False)
 
 
 class TestFaceSummary:
@@ -171,9 +174,9 @@ class TestFaceSummary:
             "cluster_id": 5,
             "bbox": {"x": 100, "y": 50, "width": 80, "height": 100},
         }
-        
+
         face = FaceSummary(**data)
-        
+
         assert face.face_id == data["face_id"]
         assert face.cluster_id == data["cluster_id"]
         assert face.bbox == data["bbox"]
@@ -185,7 +188,7 @@ class TestFaceSummary:
             "cluster_id": -1,
             "bbox": {"x": 200, "y": 150, "width": 60, "height": 80},
         }
-        
+
         face = FaceSummary(**data)
         assert face.cluster_id == -1
 
@@ -196,7 +199,7 @@ class TestFaceSummary:
             "cluster_id": -2,
             "bbox": {"x": 300, "y": 250, "width": 70, "height": 90},
         }
-        
+
         face = FaceSummary(**data)
         assert face.cluster_id == -2
 
@@ -207,14 +210,14 @@ class TestFaceSummary:
             {"x": 100, "y": 200, "width": 150, "height": 180},
             {"x": 500, "y": 300, "width": 75, "height": 90},
         ]
-        
+
         for i, bbox in enumerate(bboxes):
             data = {
                 "face_id": i + 1,
                 "cluster_id": i,
                 "bbox": bbox,
             }
-            
+
             face = FaceSummary(**data)
             assert face.bbox == bbox
 
@@ -227,7 +230,7 @@ class TestFaceSummary:
             "cluster_id": 0,
             "bbox": valid_bbox,
         }
-        
+
         face = FaceSummary(**data)
         assert face.bbox["x"] == 10
         assert face.bbox["y"] == 20
@@ -236,7 +239,7 @@ class TestFaceSummary:
 
     def test_face_summary_from_orm_config(self):
         """Test that FaceSummary has from_attributes=True config."""
-        assert FaceSummary.model_config.get('from_attributes', False)
+        assert FaceSummary.model_config.get("from_attributes", False)
 
 
 class TestImageDetailResponse:
@@ -252,7 +255,7 @@ class TestImageDetailResponse:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         faces_data = [
             {
                 "face_id": 1,
@@ -265,14 +268,14 @@ class TestImageDetailResponse:
                 "bbox": {"x": 200, "y": 150, "width": 70, "height": 90},
             },
         ]
-        
+
         data = {
             "image": image_data,
             "faces": faces_data,
         }
-        
+
         response = ImageDetailResponse(**data)
-        
+
         assert response.image.uuid == image_data["uuid"]
         assert response.image.faces == image_data["faces"]
         assert len(response.faces) == 2
@@ -289,14 +292,14 @@ class TestImageDetailResponse:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         data = {
             "image": image_data,
             "faces": [],
         }
-        
+
         response = ImageDetailResponse(**data)
-        
+
         assert response.image.faces == 0
         assert len(response.faces) == 0
 
@@ -310,7 +313,7 @@ class TestImageDetailResponse:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         faces_data = [
             {
                 "face_id": i + 1,
@@ -319,14 +322,14 @@ class TestImageDetailResponse:
             }
             for i in range(5)
         ]
-        
+
         data = {
             "image": image_data,
             "faces": faces_data,
         }
-        
+
         response = ImageDetailResponse(**data)
-        
+
         assert response.image.faces == 5
         assert len(response.faces) == 5
         for i, face in enumerate(response.faces):
@@ -343,7 +346,7 @@ class TestImageDetailResponse:
             "created_at": utc_now,
             "last_modified": utc_now,
         }
-        
+
         faces_data = [
             {
                 "face_id": 1,
@@ -352,7 +355,7 @@ class TestImageDetailResponse:
             },
             {
                 "face_id": 2,
-                "cluster_id": 0,   # Cluster 0
+                "cluster_id": 0,  # Cluster 0
                 "bbox": {"x": 200, "y": 150, "width": 70, "height": 90},
             },
             {
@@ -361,14 +364,14 @@ class TestImageDetailResponse:
                 "bbox": {"x": 300, "y": 250, "width": 75, "height": 95},
             },
         ]
-        
+
         data = {
             "image": image_data,
             "faces": faces_data,
         }
-        
+
         response = ImageDetailResponse(**data)
-        
+
         assert len(response.faces) == 3
         assert response.faces[0].cluster_id == -1
         assert response.faces[1].cluster_id == 0
@@ -376,4 +379,4 @@ class TestImageDetailResponse:
 
     def test_image_detail_response_from_orm_config(self):
         """Test that ImageDetailResponse has from_attributes=True config."""
-        assert ImageDetailResponse.model_config.get('from_attributes', False)
+        assert ImageDetailResponse.model_config.get("from_attributes", False)
