@@ -111,6 +111,8 @@ class TestLifespanEvents:
             
             mock_conn = AsyncMock()
             mock_engine.begin.return_value.__aenter__.return_value = mock_conn
+            mock_engine.dispose = AsyncMock()
+            mock_base.metadata.create_all = Mock()
             
             # Test the lifespan context manager
             async with lifespan(mock_app):
@@ -119,7 +121,7 @@ class TestLifespanEvents:
             # Verify startup tasks were called
             mock_get_blob.assert_called_once()
             mock_engine.begin.assert_called_once()
-            mock_conn.run_sync.assert_called_once()
+            mock_conn.run_sync.assert_called_once_with(mock_base.metadata.create_all)
 
     @pytest.mark.asyncio
     async def test_lifespan_shutdown_tasks(self):

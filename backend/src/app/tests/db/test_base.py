@@ -41,21 +41,24 @@ class TestAsyncSessionLocal:
     def test_async_session_local_is_created(self):
         """Test that AsyncSessionLocal is created."""
         assert AsyncSessionLocal is not None
-        assert hasattr(AsyncSessionLocal, 'bind')
+        assert callable(AsyncSessionLocal)
 
     def test_async_session_local_bind(self):
         """Test that AsyncSessionLocal is bound to the engine."""
-        assert AsyncSessionLocal.bind == engine
+        # AsyncSessionLocal is configured with the engine during initialization
+        assert AsyncSessionLocal.kw.get('bind') == engine
 
     def test_async_session_local_class(self):
         """Test that AsyncSessionLocal creates AsyncSession instances."""
-        # The class_ parameter should be AsyncSession
-        assert AsyncSessionLocal.class_ == AsyncSession
+        # AsyncSessionLocal is configured with AsyncSession
+        # The session created by AsyncSessionLocal will be AsyncSession
+        session = AsyncSessionLocal()
+        assert session.__class__.__name__ == 'AsyncSession'
 
     def test_async_session_local_expire_on_commit(self):
         """Test that expire_on_commit is set to False."""
         # This ensures attributes aren't expired after commit
-        assert AsyncSessionLocal.expire_on_commit is False
+        assert AsyncSessionLocal.kw.get('expire_on_commit') is False
 
 
 class TestBase:
@@ -191,7 +194,7 @@ class TestDatabaseIntegration:
         assert engine is not None
         
         # AsyncSessionLocal should be bound to engine
-        assert AsyncSessionLocal.bind == engine
+        assert AsyncSessionLocal.kw.get('bind') == engine
         
         # Base should exist for model definitions
         assert Base is not None

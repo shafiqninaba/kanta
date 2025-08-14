@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     AZURE_STORAGE_CONNECTION_STRING: str | None = None
     AZURE_ACCOUNT_URL: str | None = None
 
-    # JWT_SECRET: str
+    JWT_SECRET: str = "your-secret-key-here"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
@@ -45,11 +45,14 @@ class Settings(BaseSettings):
     @classmethod
     def parse_postgres_port(cls, v):
         """Convert POSTGRES_PORT to int if it's a string."""
+        if v is None:
+            return 5432  # Return default value for None
         if isinstance(v, str):
             try:
                 return int(v)
             except ValueError:
                 raise ValueError("POSTGRES_PORT must be an integer.")
+        return v
 
 @lru_cache()
 def get_settings() -> Settings:

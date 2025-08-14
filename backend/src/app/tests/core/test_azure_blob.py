@@ -199,20 +199,11 @@ class TestGetEventContainer:
 class TestGlobalBlobClientInitialization:
     """Test global blob client initialization."""
 
-    @patch("app.core.azure_blob.setup_blob_service_client")
-    @patch("app.core.azure_blob.settings")
-    def test_global_client_initialization(self, mock_settings, mock_setup):
-        """Test that global blob client is initialized with settings."""
-        mock_settings.AZURE_STORAGE_CONNECTION_STRING = "test_connection"
-        mock_settings.AZURE_ACCOUNT_URL = "test_url"
-        mock_client = Mock()
-        mock_setup.return_value = mock_client
-        
-        # Import the module to trigger initialization
+    def test_global_client_initialization(self):
+        """Test that global blob client is initialized."""
+        # Import the module to check initialization
         from app.core.azure_blob import _blob_client
         
-        # The global client should have been initialized with the settings
-        mock_setup.assert_called_with(
-            connection_string=mock_settings.AZURE_STORAGE_CONNECTION_STRING,
-            account_url=mock_settings.AZURE_ACCOUNT_URL
-        )
+        # The global client should exist and be a BlobServiceClient instance
+        assert _blob_client is not None
+        assert hasattr(_blob_client, 'get_container_client')

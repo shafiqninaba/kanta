@@ -90,11 +90,14 @@ class TestSettings:
 
     def test_azure_blob_optional_fields(self):
         """Test Azure Blob Storage optional configuration fields."""
+        # Use explicit values to avoid loading from environment
         settings = Settings(
             POSTGRES_SERVER="localhost",
             POSTGRES_USER="test_user",
             POSTGRES_PASSWORD="test_pass",
-            POSTGRES_DB="test_db"
+            POSTGRES_DB="test_db",
+            AZURE_STORAGE_CONNECTION_STRING=None,
+            AZURE_ACCOUNT_URL=None
         )
         
         assert settings.AZURE_STORAGE_CONNECTION_STRING is None
@@ -134,8 +137,10 @@ class TestSettings:
         assert settings.POSTGRES_DB == "env_db"
         assert settings.POSTGRES_PORT == 5433
 
+    @patch.dict(os.environ, {}, clear=True)
     def test_missing_required_postgres_fields(self):
         """Test validation error when required PostgreSQL fields are missing."""
+        # Clear environment variables to ensure validation error
         with pytest.raises(ValidationError) as exc_info:
             Settings()
         
